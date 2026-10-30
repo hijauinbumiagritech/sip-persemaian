@@ -1,0 +1,67 @@
+PEMBARUAN SIP PERSEMAIAN - FIREBASE AUTHENTICATION
+Tanggal: 30 Oktober 2026
+
+ISI PEMBARUAN
+- Login index.html menggunakan Email/Password Firebase Authentication.
+- Tidak lagi menggunakan password hardcoded "hijauin2026".
+- Firebase Auth menggunakan browserSessionPersistence: sesi login berlaku selama sesi browser/tab dan perlu login kembali setelah sesi berakhir.
+- Semua halaman operasional memeriksa status login sebelum menjalankan fungsi halaman.
+- firebase.js menjadi inisialisasi Firebase bersama untuk Authentication dan Firestore.
+- Fitur dashboard dan halaman operasional yang ada dipertahankan.
+
+SEBELUM DEPLOY
+1. Pastikan Cloud Firestore sudah berhasil dibuat di Firebase Console.
+2. Pastikan Authentication > Sign-in method > Email/Password berstatus Enabled.
+3. Pastikan akun admin sudah dibuat pada Authentication > Users.
+4. Database Firestore harus menggunakan Production Mode.
+5. Jangan membagikan password akun admin kepada orang lain.
+
+PASANG KE VERCEL
+1. Ekstrak ZIP ini ke folder proyek.
+2. Pastikan file berikut berada dalam satu folder yang sama:
+   index.html, semua halaman HTML, firebase.js, dan firestore.rules.
+3. Ganti file lama di folder proyek dengan file baru dari ZIP ini.
+4. Deploy ulang folder proyek ke Vercel (gunakan metode deploy yang selama ini dipakai).
+5. Setelah deploy, buka website dan login dengan email serta password akun Firebase Authentication.
+
+ATUR FIRESTORE RULES
+1. Firebase Console > Firestore Database > Rules.
+2. Ganti isi Rules dengan isi file firestore.rules.
+3. Klik Publish.
+
+ISI RULES:
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
+
+CATATAN KEAMANAN PENTING
+- Aturan ini hanya mengizinkan pengguna yang berhasil login melalui Firebase Authentication.
+- Semua akun yang terdaftar di Firebase Authentication akan memiliki hak baca/tulis ke semua koleksi SIP Persemaian. Buat akun hanya untuk petugas yang dipercaya.
+- Aturan ini belum membedakan peran Admin dan Petugas. Pembatasan peran perlu tahap lanjutan menggunakan custom claims atau data role yang divalidasi oleh rules.
+- Jangan mengaktifkan pendaftaran akun publik dari halaman aplikasi. Buat akun secara manual melalui Firebase Console.
+- Jangan mengubah rules menjadi allow read, write: if true.
+- Firebase config/API key di web app bukan rahasia; keamanan data ditegakkan oleh Authentication dan Firestore Rules.
+
+PENGUJIAN
+1. Buka https://sip-persemaian.vercel.app/
+2. Masukkan email dan password akun Firebase yang telah dibuat.
+3. Tekan Enter atau klik Masuk Beranda.
+4. Buka halaman Stok Bahan Media.
+5. Isi data uji dan klik Simpan ke Cloud.
+6. Periksa Firestore Database > Data, koleksi bahan_media.
+7. Uji logout; setelah logout, halaman operasional harus mengarahkan kembali ke login.
+
+JIKA LOGIN GAGAL
+- Pastikan Email/Password Enabled.
+- Pastikan email dan password benar.
+- Pastikan akun muncul di Authentication > Users.
+- Periksa Console browser (F12 > Console).
+- Pastikan file firebase.js ikut terunggah di Vercel dan berada satu folder dengan index.html.
+
+CATATAN
+Paket ini adalah pembaruan kode berdasarkan ZIP dashboard yang diberikan. Setelah deploy, lakukan pengujian semua halaman dan alur kerja. Jangan menghapus folder atau file lain dari proyek Vercel yang tidak ada di ZIP ini tanpa membandingkannya terlebih dahulu.
