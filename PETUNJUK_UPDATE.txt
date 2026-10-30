@@ -1,0 +1,33 @@
+UPDATE SIP PERSEMAIAN
+
+Isi paket:
+- 8 halaman lama yang telah diperbarui
+- cabutan.html: pencatatan bibit dari cabutan alam
+- stok-bibit.html: rekap stok dan pengaturan harga per jenis tanaman
+- auth.js: pemeriksaan sesi login untuk semua halaman selain index
+
+CARA MEMASANG:
+1. Cadangkan dulu seluruh file aplikasi lama.
+2. Unggah/ganti file HTML lama dengan versi dalam folder ini.
+3. Unggah file baru cabutan.html, stok-bibit.html, dan auth.js pada folder/hosting yang sama.
+4. Pastikan seluruh file berada dalam satu direktori.
+5. Buka index.html dan login.
+
+LOGIN:
+- Status login sekarang memakai sessionStorage, bukan localStorage.
+- Sesi berakhir ketika tab/sesi browser ditutup; saat membuka sesi baru harus login lagi.
+- Setiap halaman selain index.html memeriksa status login.
+
+FIREBASE:
+- Data baru cabutan disimpan pada koleksi: cabutan_bibit
+- Harga disimpan pada koleksi: harga_bibit
+- Distribusi baru menyimpan field sumber ("Media tabur" atau "Cabutan") dan ukuran bibit.
+- Stok dan validasi distribusi dipisahkan berdasarkan sumber + batch + ukuran.
+- Distribusi lama yang belum memiliki field sumber dianggap berasal dari "Media tabur".
+
+CATATAN PENTING:
+1. Login yang ada masih berupa kata sandi sisi-klien seperti versi awal. Ini penghalang akses sederhana, bukan keamanan akun yang kuat. Untuk penggunaan produksi, aktifkan Firebase Authentication dan Firestore Security Rules.
+2. Rekap stok adalah estimasi: total penyapihan + cabutan - distribusi. Data opname fisik belum dijadikan pengurang/penimpa stok otomatis.
+3. Harga bibit disimpan berdasarkan kombinasi jenis tanaman + ukuran/tinggi (contoh: Pulai + 20-30 cm). Menyimpan kombinasi yang sama akan memperbarui harga sebelumnya.
+4. Catatan penyapihan dan cabutan yang dibuat sebelum penambahan kolom ukuran akan tampil sebagai "Belum dicatat". Isi ulang/perbarui data ukuran agar harga dapat dihitung pada baris tersebut.
+5. Sebelum dipakai operasional, uji input, stok, distribusi, harga per ukuran, dan hak akses pada data uji.

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distribusi DAS - SIP</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAt_r5DKu5GYfYQSz_tJ4RhxIGwb-TLTVQ",
+            authDomain: "sip-persemaian-app.firebaseapp.com",
+            projectId: "sip-persemaian-app",
+            storageBucket: "sip-persemaian-app.appspot.com",
+            messagingSenderId: "298884874547",
+            appId: "1:298884874547:web:9ffbf2f56971b0ee8981246"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        let petaStok = {};
+        async function loadDataAwal() {
+            const select = document.getElementById('d-batch');
+            const [snapTabur, snapSapih, snapCabutan, snapDist] = await Promise.all([
+                getDocs(collection(db, "tabur_benih")),
+                getDocs(collection(db, "penyapihan")),
+                getDocs(collection(db, "cabutan_bibit")),
+                getDocs(collection(db, "distribusi_das"))
+            ]);
+            const jenisPerBatch = {};
+            snapTabur.forEach(doc => { const d = doc.data(); jenisPerBatch[d.kode] = d.jenis; });
+
+            const labelUkuran = ukuran => ukuran || "Belum dicatat";
+            const tambahPilihan = (sumber, batch, ukuran, jenis, jumlah) => {
+                const ukuranFinal = labelUkuran(ukuran);
+                const key = `${sumber}|${batch}|${ukuranFinal}`;
+                petaStok[key] = (petaStok[key] || 0) + Number(jumlah || 0);
+                if (!select.querySelector(`option[value="${CSS.escape(key)}"]`)) {
+                    const opt = document.createElement('option');
+                    opt.value = key;
+                    opt.textContent = `${sumber} - ${batch} - ${jenis || 'Jenis tidak tercatat'} - ${ukuranFinal} (Stok: ${petaStok[key]})`;
+                    select.appendChild(opt);
+                } else {
+                    const opt = select.querySelector(`option[value="${CSS.escape(key)}"]`);
+                    opt.textContent = `${sumber} - ${batch} - ${jenis || 'Jenis tidak tercatat'} - ${ukuranFinal} (Stok: ${petaStok[key]})`;
+                }
+            };
+            snapSapih.forEach(doc => {
+                const d = doc.data();
+                tambahPilihan("Media tabur", d.batch, d.ukuran, d.jenis || jenisPerBatch[d.batch], d.jumlah);
+            });
+            snapCabutan.forEach(doc => {
+                const d = doc.data();
+                tambahPilihan("Cabutan", d.batch, d.ukuran, d.jenis, d.jumlah);
+            });
+
+            // Kurangi distribusi sebelumnya berdasarkan sumber, batch, dan ukuran.
+            snapDist.forEach(doc => {
+                const d = doc.data();
+                const sumber = d.sumber || "Media tabur";
+                const ukuran = labelUkuran(d.ukuran);
+                const key = `${sumber}|${d.batch}|${ukuran}`;
+                if (petaStok[key] !== undefined) petaStok[key] -= Number(d.jumlah || 0);
+            });
+            // Perbarui label stok setelah distribusi lama dikurangkan.
+            Array.from(select.options).forEach(opt => {
+                if (!opt.value) return;
+                const [sumber, batch, ukuran] = opt.value.split("|");
+                const key = `${sumber}|${batch}|${ukuran}`;
+                const oldLabel = opt.textContent.replace(/ \(Stok:.*\)$/, "");
+                opt.textContent = `${oldLabel} (Stok: ${Math.max(0, petaStok[key] || 0)})`;
+            });
+
+            const tbody = document.getElementById('tabel-data');
+            tbody.innerHTML = '';
+            let no = 1;
+            snapDist.forEach(doc => {
+                const d = doc.data();
+                tbody.innerHTML += `<tr class="border-b">
+                    <td class="p-3">${no++}</td><td class="p-3">${d.tanggal || '-'}</td>
+                    <td class="p-3">${d.sumber || 'Media tabur'}</td><td class="p-3 font-medium">${d.batch}</td>
+                    <td class="p-3">${d.ukuran || 'Belum dicatat'}</td>
+                    <td class="p-3 font-semibold text-blue-700">${d.jumlah} Bibit</td>
+                    <td class="p-3">${d.tujuan}</td><td class="p-3">${d.sopir || '-'}</td>
+                </tr>`;
+            });
+        }
+        window.onload = loadDataAwal;
+
+        window.simpanData = async function(e) {
+            e.preventDefault();
+            const pilihan = document.getElementById('d-batch').value;
+            const [sumber, batch, ukuran] = pilihan.split('|');
+            const jumlahKeluar = parseInt(document.getElementById('d-jumlah').value, 10);
+            const stokTersedia = Math.max(0, petaStok[pilihan] || 0);
+            if (!Number.isInteger(jumlahKeluar) || jumlahKeluar <= 0) {
+                alert("Jumlah distribusi harus lebih dari 0.");
+                return;
+            }
+            if (jumlahKeluar > stokTersedia) {
+                alert(`Jumlah distribusi (${jumlahKeluar}) melebihi stok tersedia (${stokTersedia}) pada batch dan ukuran ini.`);
+                return;
+            }
+            try {
+                await addDoc(collection(db, "distribusi_das"), {
+                    tanggal: document.getElementById('d-tanggal').value,
+                    sumber, batch, ukuran, jumlah: jumlahKeluar,
+                    tujuan: document.getElementById('d-tujuan').value,
+                    sopir: document.getElementById('d-sopir').value,
+                    timestamp: new Date()
+                });
+                alert('Distribusi berhasil disimpan ke Cloud!');
+                window.location.href = 'index.html';
+            } catch (error) {
+                console.error(error);
+                alert('Gagal menyimpan distribusi.');
+            }
+        }
+    </script>
+</head>
+<body class="bg-emerald-50 text-slate-800 font-sans min-h-screen">
+    <header class="bg-emerald-800 text-white shadow-md">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+            <h1 class="text-xl font-bold">🌱 SIP - Distribusi Bibit (DAS)</h1>
+            <a href="index.html" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">Kembali</a>
+        </div>
+    </header>
+    <main class="max-w-4xl mx-auto px-4 py-8 space-y-8">
+        <div class="bg-white p-6 rounded-2xl shadow">
+            <h2 class="text-xl font-bold text-emerald-900 mb-4">Formulir Pengiriman / Surat Jalan</h2>
+            <form onsubmit="simpanData(event)" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium">Tanggal Pengiriman</label>
+                    <input type="date" id="d-tanggal" required class="w-full mt-1 p-3 border rounded-xl">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium">Pilih Batch Bibit</label>
+                    <select id="d-batch" required class="w-full mt-1 p-3 border rounded-xl">
+                        <option value="">-- Pilih Batch --</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium">Jumlah Bibit Keluar</label>
+                    <input type="number" id="d-jumlah" required placeholder="1000" class="w-full mt-1 p-3 border rounded-xl">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium">Proyek / Tujuan Rehab DAS</label>
+                    <input type="text" id="d-tujuan" required placeholder="Sub-DAS Riam Kanan" class="w-full mt-1 p-3 border rounded-xl">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium">Nama Sopir & No. Plat</label>
+                    <input type="text" id="d-sopir" placeholder="Bpk. Budi (DA 1234 XY)" class="w-full mt-1 p-3 border rounded-xl">
+                </div>
+                <button type="submit" class="w-full bg-emerald-700 text-white p-3 rounded-xl font-medium cursor-pointer">Simpan ke Cloud</button>
+            </form>
+        </div>
+
+        <div class="bg-white p-6 rounded-2xl shadow">
+            <h3 class="text-lg font-bold text-emerald-900 mb-4">Riwayat Distribusi Bibit Keluar (DAS)</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-sm">
+                    <thead>
+                        <tr class="bg-emerald-100 text-emerald-900">
+                            <th class="p-3">No</th>
+                            <th class="p-3">Tanggal</th>
+                            <th class="p-3">Sumber</th><th class="p-3">Batch</th><th class="p-3">Ukuran</th>
+                            <th class="p-3">Jumlah Keluar</th>
+                            <th class="p-3">Tujuan</th>
+                            <th class="p-3">Sopir</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabel-data">
+                        <tr><td colspan="8" class="p-4 text-center text-slate-400">Memuat data...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+    <script src="auth.js"></script>
+</body>
+</html>
