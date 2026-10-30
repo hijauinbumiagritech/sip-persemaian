@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIP - Beranda & Login</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script type="module">
+        import { db, authReady, onAuthStateChanged } from "./firebase.js";
+        import { collection, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        let chartPerkembangan = null;
+
+        const jumlah = d => Number(d?.jumlah || 0);
+        const tanggalValid = value => {
+            if (!value) return null;
+            if (typeof value === 'string') {
+                const dt = new Date(value + (value.length === 10 ? 'T00:00:00' : ''));
+                return Number.isNaN(dt.getTime()) ? null : dt;
+            }
+            if (value?.toDate) return value.toDate();
+            if (value instanceof Date) return value;
+            return null;
+        };
+        const key = (sumber, batch, ukuran='Belum dicatat') => `${sumber}|${batch}|${ukuran || 'Belum dicatat'}`;
+
+        function gambarGrafik(snapTabur, snapSapih, snapCabutan, snapDist) {
+            const now = new Date();
+            const months = [];
+            for (let i=5; i>=0; i--) months.push(new Date(now.getFullYear(), now.getMonth()-i, 1));
+            const labels = months.map(d => d.toLocaleDateString('id-ID',{month:'short',year:'2-digit'}));
+            const series = [snapTabur,snapSapih,snapCabutan,snapDist].map(snap => months.map(month => {
+                let total=0;
+                snap.forEach(doc => {
+                    const d=doc.data(), dt=tanggalValid(d.tanggal) || tanggalValid(d.timestamp);
+                    if (dt && dt.getFullYear()===month.getFullYear() && dt.getMonth()===month.getMonth()) total += jumlah(d);
+                });
+                return total;
+            }));
+            const canvas=document.getElementById('grafik-perkembangan');
+            if (!canvas || !window.Chart) return;
+            if (chartPerkembangan) chartPerkembangan.destroy();
+            chartPerkembangan=new Chart(canvas,{
+                type:'line',
+                data:{labels,datasets:[
+                    {label:'Benih ditabur (butir)',data:series[0],borderColor:'#0f766e',backgroundColor:'#0f766e',tension:.3},
+                    {label:'Bibit disapih (bibit)',data:series[1],borderColor:'#4f46e5',backgroundColor:'#4f46e5',tension:.3},
+                    {label:'Bibit cabutan (bibit)',data:series[2],borderColor:'#c026d3',backgroundColor:'#c026d3',tension:.3},
+                    {label:'Bibit didistribusikan',data:series[3],borderColor:'#2563eb',backgroundColor:'#2563eb',tension:.3}
+                ]},
+                options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'bottom'}},scales:{y:{beginAtZero:true,ticks:{callback:v=>Number(v).toLocaleString('id-ID')}}}}
+            });
+        }
+
+        function tampilkanAnomali({snapTabur,snapSapih,snapCabutan,snapDist,snapPolybag,snapOpname}) {
+            const alerts=[];
+            const taburByBatch={};
+            snapTabur.forEach(x=>{const d=x.data(); taburByBatch[d.kode]=(taburByBatch[d.kode]||0)+jumlah(d);});
+            const sapihByBatch={};
+            snapSapih.forEach(x=>{const d=x.data(); sapihByBatch[d.batch]=(sapihByBatch[d.batch]||0)+jumlah(d);});
+            Object.entries(sapihByBatch).forEach(([batch,total])=>{
+                const planted=taburByBatch[batch]||0;
+                if(total>planted) alerts.push({level:'danger',title:`Penyapihan melebihi tabur: ${batch}`,detail:`Tercatat ${total.toLocaleString('id-ID')} bibit disapih, sedangkan tabur tercatat ${planted.toLocaleString('id-ID')} butir. Periksa kode batch dan jumlah input.`});
+            });
+
+            // Periksa arus stok dengan identitas sumber, batch, dan ukuran.
+            const stock={};
+            snapSapih.forEach(x=>{const d=x.data(),k=key('Media tabur',d.batch,d.ukuran);stock[k]=(stock[k]||0)+jumlah(d);});
+            snapCabutan.forEach(x=>{const d=x.data(),k=key('Cabutan',d.batch,d.ukuran);stock[k]=(stock[k]||0)+jumlah(d);});
+            const out={};
+            snapDist.forEach(x=>{const d=x.data(),src=d.sumber||'Media tabur',k=key(src,d.batch,d.ukuran);out[k]=(out[k]||0)+jumlah(d);});
+            Object.entries(out).forEach(([k,total])=>{
+                const available=stock[k]||0;
+                if(total>available) alerts.push({level:'danger',title:`Distribusi melebihi stok: ${k.split('|').slice(1).join(' / ')}`,detail:`Distribusi ${total.toLocaleString('id-ID')} bibit, sedangkan produksi tercatat ${available.toLocaleString('id-ID')}. Selisih ${ (total-available).toLocaleString('id-ID') } bibit.`});
+            });
+
+            const totalPolybag=snapPolybag.docs.reduce((a,x)=>a+jumlah(x.data()),0);
+            const totalSapih=snapSapih.docs.reduce((a,x)=>a+jumlah(x.data()),0);
+            if(totalSapih>totalPolybag) alerts.push({level:'warning',title:'Pengisian polybag lebih rendah daripada penyapihan',detail:`Penyapihan ${totalSapih.toLocaleString('id-ID')} bibit, sedangkan pengisian polybag tercatat ${totalPolybag.toLocaleString('id-ID')} pcs. Pastikan data polybag sudah dicatat seluruhnya. Ini indikator pemeriksaan, bukan bukti kesalahan karena data belum terhubung per batch.`});
+
+            // Opname dibandingkan dengan perkiraan stok hasil penyapihan dikurangi distribusi media tabur.
+            const latest={};
+            snapOpname.forEach(x=>{const d=x.data(),dt=tanggalValid(d.timestamp)||new Date(0); if(!latest[d.batch]||dt>latest[d.batch].dt) latest[d.batch]={jumlah:jumlah(d),dt};});
+            Object.entries(latest).forEach(([batch,record])=>{
+                const produksi=sapihByBatch[batch]||0;
+                const distribusi=snapDist.docs.reduce((a,x)=>{const d=x.data();return a+((d.batch===batch&&(d.sumber||'Media tabur')==='Media tabur')?jumlah(d):0);},0);
+                const perkiraan=Math.max(0,produksi-distribusi);
+                if(record.jumlah!==perkiraan) alerts.push({level:'warning',title:`Opname berbeda dari hitungan sistem: ${batch}`,detail:`Opname terakhir ${record.jumlah.toLocaleString('id-ID')} bibit; perkiraan sistem ${perkiraan.toLocaleString('id-ID')} bibit. Selisih ${Math.abs(record.jumlah-perkiraan).toLocaleString('id-ID')} bibit. Periksa kematian, kehilangan, pemindahan, dan catatan distribusi.`});
+            });
+
+            const container=document.getElementById('daftar-anomali');
+            const count=document.getElementById('jumlah-anomali');
+            count.textContent=alerts.length;
+            if(!alerts.length){container.innerHTML='<div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-800"><strong>Belum ditemukan ketidakseimbangan dari pemeriksaan dasar.</strong><p class="text-sm mt-1">Pemeriksaan ini berdasarkan data yang sudah diinput. Tetap lakukan opname fisik secara berkala.</p></div>';return;}
+            container.innerHTML=alerts.map(a=>`<div class="rounded-xl border p-4 ${a.level==='danger'?'border-rose-200 bg-rose-50':'border-amber-200 bg-amber-50'}"><div class="flex gap-2 items-start"><span class="text-lg">${a.level==='danger'?'🔴':'🟠'}</span><div><strong class="${a.level==='danger'?'text-rose-800':'text-amber-800'}">${a.title}</strong><p class="text-sm text-slate-700 mt-1">${a.detail}</p></div></div></div>`).join('');
+        }
+
+        async function muatDataCloud() {
+            try {
+                const [snapBahan,snapPolybag,snapTabur,snapSapih,snapPerawatan,snapOpname,snapCabutan,snapDist] = await Promise.all([
+                    getDocs(collection(db,"bahan_media")),getDocs(collection(db,"isi_polybag")),getDocs(collection(db,"tabur_benih")),getDocs(collection(db,"penyapihan")),getDocs(collection(db,"perawatan")),getDocs(collection(db,"opname_fisik")),getDocs(collection(db,"cabutan_bibit")),getDocs(collection(db,"distribusi_das"))
+                ]);
+                let totalTanah=0,totalPupuk=0;
+                snapBahan.forEach(x=>{const d=x.data();if(d.jenis==='Tanah Topsoil')totalTanah+=Number(d.volume||0);if(d.jenis==='Pupuk Organik / Kompos')totalPupuk+=Number(d.volume||0);});
+                const totalPolybag=snapPolybag.docs.reduce((a,x)=>a+jumlah(x.data()),0);
+                const totalBenih=snapTabur.docs.reduce((a,x)=>a+jumlah(x.data()),0);
+                const totalSapih=snapSapih.docs.reduce((a,x)=>a+jumlah(x.data()),0);
+                const totalCabutan=snapCabutan.docs.reduce((a,x)=>a+jumlah(x.data()),0);
+                const totalDist=snapDist.docs.reduce((a,x)=>a+jumlah(x.data()),0);
+                const totalStok=Math.max(0,totalSapih+totalCabutan-totalDist);
+                document.getElementById('stat-tanah').innerText=`${totalTanah.toFixed(1)} m³`;
+                document.getElementById('stat-pupuk').innerText=`${totalPupuk.toFixed(1)} m³`;
+                document.getElementById('stat-polybag').innerText=`${totalPolybag.toLocaleString('id-ID')} Pcs`;
+                document.getElementById('stat-tabur').innerText=`${totalBenih.toLocaleString('id-ID')} Butir`;
+                document.getElementById('stat-sapih').innerText=`${totalSapih.toLocaleString('id-ID')} Bibit`;
+                document.getElementById('stat-perawatan').innerText=`${snapPerawatan.size} Kali Log`;
+                let opnameTerakhir=0; snapOpname.forEach(x=>{opnameTerakhir=jumlah(x.data());});
+                document.getElementById('stat-opname').innerText=snapOpname.size?`${opnameTerakhir.toLocaleString('id-ID')} Bibit`:'Belum Ada';
+                document.getElementById('stat-cabutan').innerText=`${totalCabutan.toLocaleString('id-ID')} Bibit`;
+                document.getElementById('stat-stok-bibit').innerText=`${totalStok.toLocaleString('id-ID')} Bibit`;
+                document.getElementById('stat-distribusi').innerText=`${totalDist.toLocaleString('id-ID')} Bibit`;
+                gambarGrafik(snapTabur,snapSapih,snapCabutan,snapDist);
+                tampilkanAnomali({snapTabur,snapSapih,snapCabutan,snapDist,snapPolybag,snapOpname});
+            } catch(e) {
+                console.error('Gagal memuat data cloud:',e);
+                document.getElementById('daftar-anomali').innerHTML='<div class="rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-800">Data dashboard gagal dimuat. Periksa koneksi internet dan aturan akses Firebase Firestore.</div>';
+            }
+        }
+        window.muatDataCloud=muatDataCloud;
+    </script>
+</head>
+<body class="bg-emerald-50 text-slate-800 font-sans min-h-screen">
+
+    <!-- LOGIN SECTION -->
+    <div id="login-section" class="flex items-center justify-center min-h-screen px-4">
+        <div class="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md space-y-6">
+            <div class="text-center">
+                <h1 class="text-2xl font-bold text-emerald-900">🌱 SIP Login</h1>
+                <p class="text-xs text-slate-500 mt-1">Sistem Informasi Persemaian PT. Hijauin Bumi Agritech</p>
+            </div>
+            <form onsubmit="prosesLogin(event)" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium" for="input-email">Email Admin / Petugas</label>
+                    <input type="email" id="input-email" required autocomplete="username" placeholder="nama@email.com" class="w-full mt-1 p-3 border rounded-xl outline-none focus:ring-2 focus:ring-emerald-600">
+                    <label class="block text-sm font-medium mt-3" for="input-sandi">Password</label>
+                    <input type="password" id="input-sandi" required autocomplete="current-password" placeholder="Masukkan password..." class="w-full mt-1 p-3 border rounded-xl outline-none focus:ring-2 focus:ring-emerald-600">
+                </div>
+                <button type="submit" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-medium p-3 rounded-xl cursor-pointer">Masuk Beranda</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- DASHBOARD SECTION -->
+    <div id="dashboard-section" class="hidden min-h-screen flex flex-col">
+        <header class="bg-emerald-800 text-white shadow-md">
+            <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+                <h1 class="text-xl font-bold">🌱 SIP - Beranda Utama (Cloud Live)</h1>
+                <button onclick="logout()" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg hover:bg-emerald-950 cursor-pointer">Keluar</button>
+            </div>
+        </header>
+
+        <nav class="bg-emerald-700 text-white shadow-inner">
+            <div class="max-w-7xl mx-auto px-4 flex overflow-x-auto space-x-2 py-3 text-sm">
+                <a href="index.html" class="px-4 py-2 bg-emerald-900 rounded font-medium whitespace-nowrap">📊 Beranda</a>
+                <a href="bahan-media.html" class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">1️⃣ Stok Bahan Media (m³)</a>
+                <a href="isi-polybag.html" class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">2️⃣ Pengisian Polybag</a>
+                <a href="tabur.html" class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">3️⃣ Tabur Benih</a>
+                <a href="sapih.html" class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">4️⃣ Penyapihan</a>
+                <a href="perawatan.html" class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">5️⃣ Siram & Pupuk</a>
+                <a href="opname.html" class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">6️⃣ Opname Bedeng</a>
+                <a href="distribusi.html" class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">7️⃣ Distribusi / DAS</a>
+                <a href="cabutan.html" class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">8️⃣ Sumber Benih Cabutan</a>
+                <a href="stok-bibit.html" class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">9️⃣ Stok Bibit & Harga</a>
+            </div>
+        </nav>
+
+        <main class="max-w-7xl mx-auto px-4 py-6 flex-1 space-y-6 w-full">
+            <h2 class="text-2xl font-bold text-emerald-900">Ringkasan Lengkap Operasional Persemaian</h2>
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                <!-- 1. Stok Tanah -->
+                <div class="bg-white p-5 rounded-xl shadow border-l-4 border-amber-600">
+                    <p class="text-sm text-slate-500">Stok Tanah (Topsoil)</p>
+                    <p id="stat-tanah" class="text-2xl font-bold text-amber-800 mt-1">Memuat...</p>
+                </div>
+                <!-- 2. Stok Pupuk -->
+                <div class="bg-white p-5 rounded-xl shadow border-l-4 border-lime-600">
+                    <p class="text-sm text-slate-500">Stok Pupuk Organik</p>
+                    <p id="stat-pupuk" class="text-2xl font-bold text-lime-800 mt-1">Memuat...</p>
+                </div>
+                <!-- 3. Polybag Terisi -->
+                <div class="bg-white p-5 rounded-xl shadow border-l-4 border-emerald-600">
+                    <p class="text-sm text-slate-500">Polybag Terisi Media</p>
+                    <p id="stat-polybag" class="text-2xl font-bold text-emerald-800 mt-1">Memuat...</p>
+                </div>
+                <!-- 4. Tabur Benih -->
+                <div class="bg-white p-5 rounded-xl shadow border-l-4 border-teal-600">
+                    <p class="text-sm text-slate-500">Total Benih Ditabur</p>
+                    <p id="stat-tabur" class="text-2xl font-bold text-teal-800 mt-1">Memuat...</p>
+                </div>
+                <!-- 5. Penyapihan -->
+                <div class="bg-white p-5 rounded-xl shadow border-l-4 border-indigo-600">
+                    <p class="text-sm text-slate-500">Total Bibit Disapih</p>
+                    <p id="stat-sapih" class="text-2xl font-bold text-indigo-800 mt-1">Memuat...</p>
+                </div>
+                <!-- 6. Perawatan -->
+                <div class="bg-white p-5 rounded-xl shadow border-l-4 border-cyan-600">
+                    <p class="text-sm text-slate-500">Log Perawatan Rutin</p>
+                    <p id="stat-perawatan" class="text-2xl font-bold text-cyan-800 mt-1">Memuat...</p>
+                </div>
+                <!-- 7. Opname Fisik -->
+                <div class="bg-white p-5 rounded-xl shadow border-l-4 border-orange-500">
+                    <p class="text-sm text-slate-500">Opname Fisik Bedeng</p>
+                    <p id="stat-opname" class="text-2xl font-bold text-orange-700 mt-1">Memuat...</p>
+                </div>
+                <div class="bg-white p-5 rounded-xl shadow border-l-4 border-fuchsia-600">
+                    <p class="text-sm text-slate-500">Bibit dari Cabutan</p>
+                    <p id="stat-cabutan" class="text-2xl font-bold text-fuchsia-800 mt-1">Memuat...</p>
+                </div>
+                <div class="bg-white p-5 rounded-xl shadow border-l-4 border-violet-600">
+                    <p class="text-sm text-slate-500">Stok Bibit Tersedia</p>
+                    <p id="stat-stok-bibit" class="text-2xl font-bold text-violet-800 mt-1">Memuat...</p>
+                </div>
+                <!-- 8. Distribusi DAS -->
+                <div class="bg-white p-5 rounded-xl shadow border-l-4 border-blue-600">
+                    <p class="text-sm text-slate-500">Bibit Keluar (DAS)</p>
+                    <p id="stat-distribusi" class="text-2xl font-bold text-blue-800 mt-1">Memuat...</p>
+                </div>
+            </div>
+
+            <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="lg:col-span-2 bg-white p-5 rounded-2xl shadow">
+                    <div class="flex flex-wrap justify-between items-center gap-2 mb-4">
+                        <div><h3 class="text-lg font-bold text-emerald-900">Grafik Perkembangan Persemaian</h3><p class="text-xs text-slate-500">Pergerakan data enam bulan terakhir berdasarkan tanggal pencatatan.</p></div>
+                        <span class="text-xs bg-emerald-50 text-emerald-800 px-3 py-1 rounded-full">Data Firestore</span>
+                    </div>
+                    <div class="relative h-80"><canvas id="grafik-perkembangan"></canvas></div>
+                </div>
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <div class="flex justify-between items-center gap-2 mb-4"><div><h3 class="text-lg font-bold text-emerald-900">Peringatan Anomali</h3><p class="text-xs text-slate-500">Pemeriksaan ketidakseimbangan data.</p></div><span id="jumlah-anomali" class="min-w-8 text-center bg-rose-100 text-rose-800 font-bold px-2 py-1 rounded-full">0</span></div>
+                    <div id="daftar-anomali" class="space-y-3"><div class="text-sm text-slate-500 p-3">Memeriksa data persemaian...</div></div>
+                </div>
+            </section>
+            <p class="text-xs text-slate-500">Catatan: indikator anomali adalah alat bantu pemeriksaan. Perbedaan jumlah dapat terjadi karena kematian, penyusutan, pemindahan, atau pencatatan yang belum lengkap. Konfirmasi dengan dokumen dan opname fisik.</p>
+        </main>
+    </div>
+
+    <script type="module">
+        import { auth, authReady, signIn, signOutUser, onAuthStateChanged } from "./firebase.js";
+
+        const loginSection = document.getElementById('login-section');
+        const dashboardSection = document.getElementById('dashboard-section');
+
+        function tampilkanStatusLogin(user) {
+            if (user) {
+                loginSection.classList.add('hidden');
+                dashboardSection.classList.remove('hidden');
+                if (typeof window.muatDataCloud === 'function') window.muatDataCloud();
+            } else {
+                dashboardSection.classList.add('hidden');
+                loginSection.classList.remove('hidden');
+            }
+        }
+
+        window.prosesLogin = async function(event) {
+            event.preventDefault();
+            const email = document.getElementById('input-email').value;
+            const password = document.getElementById('input-sandi').value;
+            const tombol = event.submitter || document.querySelector('#login-section button[type="submit"]');
+            if (tombol) { tombol.disabled = true; tombol.textContent = 'Memeriksa...'; }
+            try {
+                await signIn(email, password);
+            } catch (error) {
+                console.error('Login Firebase gagal:', error);
+                alert('Login gagal. Periksa email dan password. (' + (error.code || error.message) + ')');
+            } finally {
+                if (tombol) { tombol.disabled = false; tombol.textContent = 'Masuk Beranda'; }
+            }
+        };
+
+        window.logout = async function() {
+            try { await signOutUser(); }
+            catch (error) { console.error('Logout gagal:', error); alert('Gagal keluar: ' + error.message); }
+        };
+
+        await authReady;
+        onAuthStateChanged(auth, tampilkanStatusLogin);
+    </script>
+</body>
+</html>
