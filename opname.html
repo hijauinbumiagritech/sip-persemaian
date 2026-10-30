@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -5,91 +6,252 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Opname Fisik - SIP</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
     <script type="module">
-
         import { db, requireAuth } from "./firebase.js";
+        import {
+            collection,
+            addDoc,
+            getDocs,
+            query,
+            orderBy
+        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-import { collection, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        if (!(await requireAuth())) {
+            throw new Error("Login diperlukan.");
+        }
 
+        const batchSelect = document.getElementById("o-batch");
+        const tabelData = document.getElementById("tabel-data");
+        const formOpname = document.getElementById("form-opname");
 
-        
-        if (!(await requireAuth())) throw new Error('Login diperlukan.');
-async function loadDataAwal() {
-            const snap = await getDocs(collection(db, "penyapihan"));
-            let select = document.getElementById('o-batch');
-            snap.forEach(doc => {
-                let d = doc.data();
-                select.innerHTML += `<option value="${d.batch}">${d.batch} (${d.lokasi})</option>`;
-            });
+        async function loadDataAwal() {
+            try {
+                // Memuat daftar batch dari data penyapihan
+                const snap = await getDocs(collection(db, "penyapihan"));
 
-            const snapOpname = await getDocs(collection(db, "opname_fisik"));
-            let tbody = document.getElementById('tabel-data');
-            tbody.innerHTML = "";
-            let no = 1;
-            snapOpname.forEach(doc => {
-                let d = doc.data();
-                tbody.innerHTML += `
-                    <tr class="border-b">
-                        <td class="p-3">${no++}</td>
-                        <td class="p-3 font-medium">${d.batch}</td>
-                        <td class="p-3 font-semibold text-orange-700">${d.jumlah} Bibit</td>
-                        <td class="p-3 text-slate-600">${d.catatan || '-'}</td>
+                batchSelect.innerHTML = `
+                    <option value="">-- Pilih Batch Sapih --</option>
+                `;
+
+                const daftarBatch = new Set();
+
+                snap.forEach((doc) => {
+                    const d = doc.data();
+
+                    if (d.batch && !daftarBatch.has(d.batch)) {
+                        daftarBatch.add(d.batch);
+
+                        const option = document.createElement("option");
+                        option.value = d.batch;
+                        option.textContent = `${d.batch} (${d.lokasi || "-"})`;
+
+                        batchSelect.appendChild(option);
+                    }
+                });
+
+                if (daftarBatch.size === 0) {
+                    batchSelect.innerHTML = `
+                        <option value="">Belum ada batch penyapihan</option>
+                    `;
+                }
+
+                // Memuat riwayat opname fisik
+                const qOpname = query(
+                    collection(db, "opname_fisik"),
+                    orderBy("timestamp", "desc")
+                );
+
+                const snapOpname = await getDocs(qOpname);
+
+                tabelData.innerHTML = "";
+
+                if (snapOpname.empty) {
+                    tabelData.innerHTML = `
+                        <tr>
+                            <td colspan="4" class="p-4 text-center text-slate-400">
+                                Belum ada riwayat opname fisik.
+                            </td>
+                        </tr>
+                    `;
+                    return;
+                }
+
+                let no = 1;
+
+                snapOpname.forEach((doc) => {
+                    const d = doc.data();
+
+                    const tr = document.createElement("tr");
+                    tr.className = "border-b hover:bg-emerald-50";
+
+                    const tdNo = document.createElement("td");
+                    tdNo.className = "p-3";
+                    tdNo.textContent = no++;
+
+                    const tdBatch = document.createElement("td");
+                    tdBatch.className = "p-3 font-medium";
+                    tdBatch.textContent = d.batch || "-";
+
+                    const tdJumlah = document.createElement("td");
+                    tdJumlah.className = "p-3 font-semibold text-orange-700";
+                    tdJumlah.textContent = `${d.jumlah ?? 0} Bibit`;
+
+                    const tdCatatan = document.createElement("td");
+                    tdCatatan.className = "p-3 text-slate-600";
+                    tdCatatan.textContent = d.catatan || "-";
+
+                    tr.append(tdNo, tdBatch, tdJumlah, tdCatatan);
+                    tabelData.appendChild(tr);
+                });
+
+            } catch (error) {
+                console.error("Gagal memuat data opname:", error);
+
+                tabelData.innerHTML = `
+                    <tr>
+                        <td colspan="4" class="p-4 text-center text-red-600">
+                            Gagal memuat riwayat: ${error.message}
+                        </td>
                     </tr>
                 `;
-            });
-        }
-        window.onload = loadDataAwal;
 
-        window.simpanData = async function(e) {
-            e.preventDefault();
-            try {
-                await addDoc(collection(db, "opname_fisik"), {
-                    batch: document.getElementById('o-batch').value,
-                    jumlah: parseInt(document.getElementById('o-jumlah').value),
-                    catatan: document.getElementById('o-catatan').value,
-                    timestamp: new Date()
-                });
-                alert('Opname fisik berhasil diperbarui ke Cloud!');
-                window.location.href = 'index.html';
-            } catch (error) {
-                alert('Gagal menyimpan.');
+                alert("Gagal memuat data opname. Periksa koneksi atau konfigurasi Firestore.");
             }
         }
+
+        // Memuat data setelah autentikasi berhasil
+        await loadDataAwal();
+
+        // Menyimpan opname fisik
+        window.simpanData = async function(e) {
+            e.preventDefault();
+
+            const batch = batchSelect.value;
+            const jumlah = Number(document.getElementById("o-jumlah").value);
+            const catatan = document.getElementById("o-catatan").value.trim();
+
+            if (!batch) {
+                alert("Silakan pilih batch sapih terlebih dahulu.");
+                return;
+            }
+
+            if (!Number.isInteger(jumlah) || jumlah < 0) {
+                alert("Jumlah fisik harus berupa bilangan bulat dan tidak boleh kurang dari 0.");
+                return;
+            }
+
+            const tombol = formOpname.querySelector('button[type="submit"]');
+            tombol.disabled = true;
+            tombol.textContent = "Menyimpan...";
+
+            try {
+                await addDoc(collection(db, "opname_fisik"), {
+                    batch: batch,
+                    jumlah: jumlah,
+                    catatan: catatan,
+                    timestamp: new Date()
+                });
+
+                alert("Opname fisik berhasil disimpan ke Cloud!");
+                window.location.href = "index.html";
+
+            } catch (error) {
+                console.error("Gagal menyimpan opname:", error);
+                alert("Gagal menyimpan opname: " + error.message);
+
+                tombol.disabled = false;
+                tombol.textContent = "Simpan ke Cloud";
+            }
+        };
     </script>
 </head>
+
 <body class="bg-emerald-50 text-slate-800 font-sans min-h-screen">
+
     <header class="bg-emerald-800 text-white shadow-md">
         <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
             <h1 class="text-xl font-bold">🌱 SIP - Opname Fisik Bedeng</h1>
-            <a href="index.html" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">Kembali</a>
+            <a href="index.html" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">
+                Kembali
+            </a>
         </div>
     </header>
+
     <main class="max-w-4xl mx-auto px-4 py-8 space-y-8">
+
         <div class="bg-white p-6 rounded-2xl shadow">
-            <h2 class="text-xl font-bold text-emerald-900 mb-4">Koreksi Jumlah Fisik Terbaru di Bedeng</h2>
-            <form onsubmit="simpanData(event)" class="space-y-4">
+            <h2 class="text-xl font-bold text-emerald-900 mb-4">
+                Koreksi Jumlah Fisik Terbaru di Bedeng
+            </h2>
+
+            <form id="form-opname" onsubmit="simpanData(event)" class="space-y-4">
+
                 <div>
-                    <label class="block text-sm font-medium">Pilih Batch Sapih</label>
-                    <select id="o-batch" required class="w-full mt-1 p-3 border rounded-xl">
-                        <option value="">-- Pilih Batch Sapih --</option>
+                    <label class="block text-sm font-medium">
+                        Pilih Batch Sapih
+                    </label>
+
+                    <select
+                        id="o-batch"
+                        required
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
+                        <option value="">Memuat batch...</option>
                     </select>
                 </div>
+
                 <div>
-                    <label class="block text-sm font-medium">Jumlah Sisa Fisik Terbaru</label>
-                    <input type="number" id="o-jumlah" required placeholder="3800" class="w-full mt-1 p-3 border rounded-xl">
+                    <label class="block text-sm font-medium">
+                        Jumlah Sisa Fisik Terbaru
+                    </label>
+
+                    <input
+                        type="number"
+                        id="o-jumlah"
+                        min="0"
+                        step="1"
+                        required
+                        placeholder="Contoh: 3800"
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
+
+                    <p class="text-xs text-slate-500 mt-1">
+                        Masukkan jumlah bibit yang benar-benar tersedia saat opname.
+                    </p>
                 </div>
+
                 <div>
-                    <label class="block text-sm font-medium">Catatan / Alasan</label>
-                    <input type="text" id="o-catatan" placeholder="Opname mingguan" class="w-full mt-1 p-3 border rounded-xl">
+                    <label class="block text-sm font-medium">
+                        Catatan / Alasan
+                    </label>
+
+                    <input
+                        type="text"
+                        id="o-catatan"
+                        placeholder="Contoh: Opname mingguan"
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
                 </div>
-                <button type="submit" class="w-full bg-emerald-700 text-white p-3 rounded-xl font-medium cursor-pointer">Simpan ke Cloud</button>
+
+                <button
+                    type="submit"
+                    class="w-full bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium cursor-pointer disabled:opacity-50"
+                >
+                    Simpan ke Cloud
+                </button>
+
             </form>
         </div>
 
         <div class="bg-white p-6 rounded-2xl shadow">
-            <h3 class="text-lg font-bold text-emerald-900 mb-4">Riwayat Opname Fisik</h3>
+            <h3 class="text-lg font-bold text-emerald-900 mb-4">
+                Riwayat Opname Fisik
+            </h3>
+
             <div class="overflow-x-auto">
                 <table class="w-full text-left border-collapse text-sm">
+
                     <thead>
                         <tr class="bg-emerald-100 text-emerald-900">
                             <th class="p-3">No</th>
@@ -98,12 +260,20 @@ async function loadDataAwal() {
                             <th class="p-3">Catatan</th>
                         </tr>
                     </thead>
+
                     <tbody id="tabel-data">
-                        <tr><td colspan="4" class="p-4 text-center text-slate-400">Memuat data...</td></tr>
+                        <tr>
+                            <td colspan="4" class="p-4 text-center text-slate-400">
+                                Memuat data...
+                            </td>
+                        </tr>
                     </tbody>
+
                 </table>
             </div>
         </div>
+
     </main>
+
 </body>
 </html>
