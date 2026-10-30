@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Perawatan - SIP</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAt_r5DKu5GYfYQSz_tJ4RhxIGwb-TLTVQ",
+            authDomain: "sip-persemaian-app.firebaseapp.com",
+            projectId: "sip-persemaian-app",
+            storageBucket: "sip-persemaian-app.appspot.com",
+            messagingSenderId: "298884874547",
+            appId: "1:298884874547:web:9ffbf2f56971b0ee8981246"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        window.simpanData = async function(e) {
+            e.preventDefault();
+            try {
+                await addDoc(collection(db, "perawatan"), {
+                    tanggal: document.getElementById('p-tanggal').value,
+                    jenis: document.getElementById('p-jenis').value,
+                    lokasi: document.getElementById('p-lokasi').value,
+                    catatan: document.getElementById('p-catatan').value,
+                    timestamp: new Date()
+                });
+                alert('Log perawatan berhasil disimpan ke Cloud!');
+                window.location.href = 'index.html';
+            } catch (error) {
+                alert('Gagal menyimpan.');
+            }
+        }
+
+        async function muatTabel() {
+            try {
+                const querySnapshot = await getDocs(collection(db, "perawatan"));
+                let tbody = document.getElementById('tabel-data');
+                tbody.innerHTML = "";
+                let no = 1;
+                querySnapshot.forEach((doc) => {
+                    let d = doc.data();
+                    tbody.innerHTML += `
+                        <tr class="border-b">
+                            <td class="p-3">${no++}</td>
+                            <td class="p-3">${d.tanggal}</td>
+                            <td class="p-3 font-medium">${d.jenis}</td>
+                            <td class="p-3">${d.lokasi}</td>
+                            <td class="p-3 text-slate-600">${d.catatan || '-'}</td>
+                        </tr>
+                    `;
+                });
+            } catch (e) {
+                console.error("Gagal memuat tabel:", e);
+            }
+        }
+        window.onload = muatTabel;
+    </script>
+</head>
+<body class="bg-emerald-50 text-slate-800 font-sans min-h-screen">
+    <header class="bg-emerald-800 text-white shadow-md">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+            <h1 class="text-xl font-bold">🌱 SIP - Log Perawatan</h1>
+            <a href="index.html" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">Kembali</a>
+        </div>
+    </header>
+    <main class="max-w-4xl mx-auto px-4 py-8 space-y-8">
+        <div class="bg-white p-6 rounded-2xl shadow">
+            <h2 class="text-xl font-bold text-emerald-900 mb-4">Catat Jadwal Penyiraman & Pemupukan</h2>
+            <form onsubmit="simpanData(event)" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium">Tanggal Kegiatan</label>
+                    <input type="date" id="p-tanggal" required class="w-full mt-1 p-3 border rounded-xl">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium">Jenis Kegiatan</label>
+                    <select id="p-jenis" class="w-full mt-1 p-3 border rounded-xl">
+                        <option value="Penyiraman Rutin">Penyiraman Rutin</option>
+                        <option value="Pemupukan NPK/Organik">Pemupukan NPK/Organik</option>
+                        <option value="Penyemprotan Pestisida">Penyemprotan Pestisida</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium">Lokasi Blok / Bedeng</label>
+                    <input type="text" id="p-lokasi" required placeholder="Blok B3" class="w-full mt-1 p-3 border rounded-xl">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium">Catatan / Dosis</label>
+                    <textarea id="p-catatan" placeholder="Dosis 2 gram per liter air" class="w-full mt-1 p-3 border rounded-xl"></textarea>
+                </div>
+                <button type="submit" class="w-full bg-emerald-700 text-white p-3 rounded-xl font-medium cursor-pointer">Simpan ke Cloud</button>
+            </form>
+        </div>
+
+        <div class="bg-white p-6 rounded-2xl shadow">
+            <h3 class="text-lg font-bold text-emerald-900 mb-4">Riwayat Log Perawatan</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-sm">
+                    <thead>
+                        <tr class="bg-emerald-100 text-emerald-900">
+                            <th class="p-3">No</th>
+                            <th class="p-3">Tanggal</th>
+                            <th class="p-3">Kegiatan</th>
+                            <th class="p-3">Lokasi</th>
+                            <th class="p-3">Catatan</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabel-data">
+                        <tr><td colspan="5" class="p-4 text-center text-slate-400">Memuat data...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+    <script src="auth.js"></script>
+</body>
+</html>

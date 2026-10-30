@@ -1,0 +1,19 @@
+PETUNJUK PEMBARUAN SIP PERSEMAIAN
+
+1. Ekstrak seluruh isi ZIP ke satu folder.
+2. Jangan pisahkan file HTML dari folder yang sama.
+3. Buka index.html melalui hosting/server lokal yang mendukung modul JavaScript, atau deploy ke Firebase Hosting. Hindari membuka langsung dengan file:// bila modul Firebase diblokir browser.
+4. Pastikan koneksi internet tersedia karena aplikasi menggunakan Firebase dan Chart.js dari CDN.
+
+PEMBARUAN LOGIN DAN DASHBOARD (30 OKTOBER 2026)
+- Login menggunakan form submit; menekan Enter setelah memasukkan kata sandi akan menjalankan proses login.
+- Beranda menampilkan grafik enam bulan terakhir: benih ditabur, bibit disapih, bibit cabutan, dan distribusi.
+- Panel Peringatan Anomali memeriksa penyapihan yang melebihi tabur per batch, distribusi yang melebihi produksi per sumber/batch/ukuran, indikasi ketidakseimbangan polybag terhadap penyapihan, serta selisih opname terhadap perkiraan stok penyapihan dikurangi distribusi media tabur.
+- Grafik membutuhkan koneksi internet untuk memuat Chart.js.
+- Peringatan adalah indikator pemeriksaan, bukan keputusan otomatis bahwa telah terjadi kesalahan operasional. Konfirmasi dengan dokumen dan opname fisik.
+
+CATATAN DATA
+- Data lama tanpa ukuran bibit akan ditampilkan sebagai Belum dicatat pada halaman stok.
+- Data lama yang tidak memiliki sumber distribusi dianggap sebagai Media tabur.
+- Dashboard membaca data dari koleksi Firestore yang sudah dipakai aplikasi. Pastikan aturan Firestore mengizinkan pengguna membaca data.
+- Login kata sandi sisi browser masih merupakan pengunci sederhana, bukan autentikasi aman untuk aplikasi produksi.

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stok Bahan Media - SIP</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAt_r5DKu5GYfYQSz_tJ4RhxIGwb-TLTVQ",
+            authDomain: "sip-persemaian-app.firebaseapp.com",
+            projectId: "sip-persemaian-app",
+            storageBucket: "sip-persemaian-app.appspot.com",
+            messagingSenderId: "298884874547",
+            appId: "1:298884874547:web:9ffbf2f56971b0ee8981246"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        window.simpanData = async function(e) {
+            e.preventDefault();
+            try {
+                await addDoc(collection(db, "bahan_media"), {
+                    tanggal: document.getElementById('bm-tanggal').value,
+                    jenis: document.getElementById('bm-jenis').value,
+                    volume: parseFloat(document.getElementById('bm-volume').value),
+                    timestamp: new Date()
+                });
+                alert('Data bahan media berhasil disimpan ke Cloud!');
+                window.location.href = 'index.html';
+            } catch (error) {
+                alert('Gagal menyimpan ke cloud.');
+            }
+        }
+
+        async function muatTabel() {
+            try {
+                const q = query(collection(db, "bahan_media"), orderBy("tanggal", "desc"));
+                const querySnapshot = await getDocs(q);
+                let tbody = document.getElementById('tabel-data');
+                tbody.innerHTML = "";
+                let no = 1;
+                querySnapshot.forEach((doc) => {
+                    let d = doc.data();
+                    tbody.innerHTML += `
+                        <tr class="border-b">
+                            <td class="p-3">${no++}</td>
+                            <td class="p-3">${d.tanggal}</td>
+                            <td class="p-3">${d.jenis}</td>
+                            <td class="p-3 font-semibold text-emerald-700">${d.volume} m³</td>
+                        </tr>
+                    `;
+                });
+            } catch (e) {
+                console.error("Gagal memuat tabel:", e);
+            }
+        }
+        window.onload = muatTabel;
+    </script>
+</head>
+<body class="bg-emerald-50 text-slate-800 font-sans min-h-screen">
+    <header class="bg-emerald-800 text-white shadow-md">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+            <h1 class="text-xl font-bold">🌱 SIP - Stok Bahan Media (m³)</h1>
+            <a href="index.html" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">Kembali</a>
+        </div>
+    </header>
+    <main class="max-w-4xl mx-auto px-4 py-8 space-y-8">
+        <div class="bg-white p-6 rounded-2xl shadow">
+            <h2 class="text-xl font-bold text-emerald-900 mb-4">Formulir Stok Masuk Bahan Media</h2>
+            <form onsubmit="simpanData(event)" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium">Tanggal Penerimaan</label>
+                    <input type="date" id="bm-tanggal" required class="w-full mt-1 p-3 border rounded-xl">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium">Jenis Bahan Media</label>
+                    <select id="bm-jenis" class="w-full mt-1 p-3 border rounded-xl">
+                        <option value="Tanah Topsoil">Tanah Topsoil</option>
+                        <option value="Pupuk Organik / Kompos">Pupuk Organik / Kompos</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium">Volume Masuk (m³)</label>
+                    <input type="number" step="0.1" id="bm-volume" required placeholder="10" class="w-full mt-1 p-3 border rounded-xl">
+                </div>
+                <button type="submit" class="w-full bg-emerald-700 text-white p-3 rounded-xl font-medium cursor-pointer">Simpan ke Cloud</button>
+            </form>
+        </div>
+
+        <div class="bg-white p-6 rounded-2xl shadow">
+            <h3 class="text-lg font-bold text-emerald-900 mb-4">Riwayat Masuk Bahan Media</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-sm">
+                    <thead>
+                        <tr class="bg-emerald-100 text-emerald-900">
+                            <th class="p-3">No</th>
+                            <th class="p-3">Tanggal</th>
+                            <th class="p-3">Jenis Bahan</th>
+                            <th class="p-3">Volume</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabel-data">
+                        <tr><td colspan="4" class="p-4 text-center text-slate-400">Memuat data...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+    <script src="auth.js"></script>
+</body>
+</html>
