@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -5,123 +6,321 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Penyapihan - SIP</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
     <script type="module">
-
         import { db, requireAuth } from "./firebase.js";
+        import {
+            collection,
+            addDoc,
+            getDocs
+        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-import { collection, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        if (!(await requireAuth())) {
+            throw new Error("Login diperlukan.");
+        }
 
-
-        
-        if (!(await requireAuth())) throw new Error('Login diperlukan.');
-// Simpan data batch untuk pengecekan validasi stok
+        // Peta stok dan jenis benih berdasarkan batch
         let petaStokTabur = {};
         let petaJenisTabur = {};
 
-        async function loadDataAwal() {
-            // 1. Muat pilihan batch tabur
-            const snapTabur = await getDocs(collection(db, "tabur_benih"));
-            let select = document.getElementById('s-batch');
-            snapTabur.forEach(doc => {
-                let d = doc.data();
-                petaStokTabur[d.kode] = Number(d.jumlah); // Rekam jumlah benih awal
-                petaJenisTabur[d.kode] = d.jenis || "Tidak diketahui";
-                select.innerHTML += `<option value="${d.kode}">${d.kode} - ${d.jenis} (Stok: ${d.jumlah})</option>`;
-            });
+        const selectBatch = document.getElementById("s-batch");
+        const tabelData = document.getElementById("tabel-data");
+        const formSapih = document.getElementById("form-sapih");
 
-            // 2. Muat riwayat tabel penyapihan
-            const snapSapih = await getDocs(collection(db, "penyapihan"));
-            let tbody = document.getElementById('tabel-data');
-            tbody.innerHTML = "";
-            let no = 1;
-            snapSapih.forEach(doc => {
-                let d = doc.data();
-                tbody.innerHTML += `
-                    <tr class="border-b">
-                        <td class="p-3">${no++}</td>
-                        <td class="p-3 font-medium">${d.batch}</td>
-                        <td class="p-3">${d.ukuran || 'Belum dicatat'}</td>
-                        <td class="p-3">${d.tanggal}</td>
-                        <td class="p-3">${d.lokasi}</td>
-                        <td class="p-3 font-semibold text-emerald-700">${d.jumlah} Bibit</td>
+        // Memuat pilihan batch dan riwayat penyapihan
+        async function loadDataAwal() {
+            try {
+                // 1. Memuat batch tabur benih
+                const snapTabur = await getDocs(collection(db, "tabur_benih"));
+
+                selectBatch.innerHTML = `
+                    <option value="">-- Pilih Batch --</option>
+                `;
+
+                const daftarBatch = new Set();
+
+                snapTabur.forEach((doc) => {
+                    const d = doc.data();
+
+                    if (!d.kode) return;
+
+                    petaStokTabur[d.kode] = Number(d.jumlah) || 0;
+                    petaJenisTabur[d.kode] = d.jenis || "Tidak diketahui";
+
+                    if (!daftarBatch.has(d.kode)) {
+                        daftarBatch.add(d.kode);
+
+                        const option = document.createElement("option");
+                        option.value = d.kode;
+                        option.textContent =
+                            `${d.kode} - ${d.jenis || "Tidak diketahui"} (Stok: ${Number(d.jumlah) || 0})`;
+
+                        selectBatch.appendChild(option);
+                    }
+                });
+
+                if (daftarBatch.size === 0) {
+                    selectBatch.innerHTML = `
+                        <option value="">Belum ada batch tabur benih</option>
+                    `;
+                }
+
+                // 2. Memuat riwayat penyapihan
+                const snapSapih = await getDocs(collection(db, "penyapihan"));
+
+                tabelData.innerHTML = "";
+
+                if (snapSapih.empty) {
+                    tabelData.innerHTML = `
+                        <tr>
+                            <td colspan="6" class="p-4 text-center text-slate-400">
+                                Belum ada riwayat penyapihan.
+                            </td>
+                        </tr>
+                    `;
+                    return;
+                }
+
+                let no = 1;
+
+                snapSapih.forEach((doc) => {
+                    const d = doc.data();
+
+                    const tr = document.createElement("tr");
+                    tr.className = "border-b hover:bg-emerald-50";
+
+                    const tdNo = document.createElement("td");
+                    tdNo.className = "p-3";
+                    tdNo.textContent = no++;
+
+                    const tdBatch = document.createElement("td");
+                    tdBatch.className = "p-3 font-medium";
+                    tdBatch.textContent = d.batch || "-";
+
+                    const tdUkuran = document.createElement("td");
+                    tdUkuran.className = "p-3";
+                    tdUkuran.textContent = d.ukuran || "Belum dicatat";
+
+                    const tdTanggal = document.createElement("td");
+                    tdTanggal.className = "p-3";
+                    tdTanggal.textContent = d.tanggal || "-";
+
+                    const tdLokasi = document.createElement("td");
+                    tdLokasi.className = "p-3";
+                    tdLokasi.textContent = d.lokasi || "-";
+
+                    const tdJumlah = document.createElement("td");
+                    tdJumlah.className = "p-3 font-semibold text-emerald-700";
+                    tdJumlah.textContent = `${d.jumlah ?? 0} Bibit`;
+
+                    tr.append(
+                        tdNo,
+                        tdBatch,
+                        tdUkuran,
+                        tdTanggal,
+                        tdLokasi,
+                        tdJumlah
+                    );
+
+                    tabelData.appendChild(tr);
+                });
+
+            } catch (error) {
+                console.error("Gagal memuat data penyapihan:", error);
+
+                tabelData.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="p-4 text-center text-red-600">
+                            Gagal memuat data: ${error.message}
+                        </td>
                     </tr>
                 `;
-            });
-        }
-        window.onload = loadDataAwal;
 
+                alert("Gagal memuat data penyapihan. Periksa koneksi atau Firestore.");
+            }
+        }
+
+        // Memuat data setelah autentikasi berhasil
+        await loadDataAwal();
+
+        // Menyimpan data penyapihan
         window.simpanData = async function(e) {
             e.preventDefault();
-            let batchPilihan = document.getElementById('s-batch').value;
-            let jumlahDisapih = parseInt(document.getElementById('s-jumlah').value);
-            let stokMaksimal = petaStokTabur[batchPilihan] || 0;
 
-            // VALIDASI: Cek apakah jumlah disapih melebihi benih yang ditabur
-            if (jumlahDisapih > stokMaksimal) {
-                alert(`Peringatan Anomali: Jumlah disapih (${jumlahDisapih}) melebihi stok benih ditabur pada batch ini (${stokMaksimal})!`);
-                return; // Batalkan proses simpan
+            const batchPilihan = selectBatch.value;
+            const jumlahDisapih = Number(
+                document.getElementById("s-jumlah").value
+            );
+
+            const ukuran = document.getElementById("s-ukuran").value.trim();
+            const tanggal = document.getElementById("s-tanggal").value;
+            const lokasi = document.getElementById("s-lokasi").value.trim();
+
+            if (!batchPilihan) {
+                alert("Silakan pilih batch tabur terlebih dahulu.");
+                return;
             }
+
+            if (!Number.isInteger(jumlahDisapih) || jumlahDisapih <= 0) {
+                alert("Jumlah bibit harus berupa bilangan bulat lebih dari 0.");
+                return;
+            }
+
+            if (!ukuran || !tanggal || !lokasi) {
+                alert("Ukuran, tanggal, dan lokasi penyapihan wajib diisi.");
+                return;
+            }
+
+            const stokMaksimal = petaStokTabur[batchPilihan] || 0;
+
+            // Validasi jumlah terhadap stok batch tabur
+            if (jumlahDisapih > stokMaksimal) {
+                alert(
+                    `Peringatan: Jumlah disapih (${jumlahDisapih}) melebihi stok benih tabur pada batch ${batchPilihan} (${stokMaksimal})!`
+                );
+                return;
+            }
+
+            const tombol = formSapih.querySelector('button[type="submit"]');
+            tombol.disabled = true;
+            tombol.textContent = "Menyimpan...";
 
             try {
                 await addDoc(collection(db, "penyapihan"), {
                     batch: batchPilihan,
                     jenis: petaJenisTabur[batchPilihan] || "Tidak diketahui",
-                    ukuran: document.getElementById('s-ukuran').value.trim(),
+                    ukuran: ukuran,
                     sumber: "Media tabur",
-                    tanggal: document.getElementById('s-tanggal').value,
+                    tanggal: tanggal,
                     jumlah: jumlahDisapih,
-                    lokasi: document.getElementById('s-lokasi').value,
+                    lokasi: lokasi,
                     timestamp: new Date()
                 });
-                alert('Penyapihan berhasil disimpan ke Cloud!');
-                window.location.href = 'index.html';
+
+                alert("Penyapihan berhasil disimpan ke Cloud!");
+                window.location.href = "index.html";
+
             } catch (error) {
-                alert('Gagal menyimpan ke cloud.');
+                console.error("Gagal menyimpan penyapihan:", error);
+                alert("Gagal menyimpan data: " + error.message);
+
+                tombol.disabled = false;
+                tombol.textContent = "Simpan ke Cloud";
             }
-        }
+        };
     </script>
 </head>
+
 <body class="bg-emerald-50 text-slate-800 font-sans min-h-screen">
+
     <header class="bg-emerald-800 text-white shadow-md">
         <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
             <h1 class="text-xl font-bold">🌱 SIP - Penyapihan (Polybag)</h1>
-            <a href="index.html" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">Kembali</a>
+
+            <a href="index.html" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">
+                Kembali
+            </a>
         </div>
     </header>
+
     <main class="max-w-4xl mx-auto px-4 py-8 space-y-8">
+
         <div class="bg-white p-6 rounded-2xl shadow">
-            <h2 class="text-xl font-bold text-emerald-900 mb-4">Formulir Penyapihan Bibit</h2>
-            <form onsubmit="simpanData(event)" class="space-y-4">
+            <h2 class="text-xl font-bold text-emerald-900 mb-4">
+                Formulir Penyapihan Bibit
+            </h2>
+
+            <form id="form-sapih" onsubmit="simpanData(event)" class="space-y-4">
+
                 <div>
-                    <label class="block text-sm font-medium">Pilih Batch Tabur</label>
-                    <select id="s-batch" required class="w-full mt-1 p-3 border rounded-xl">
-                        <option value="">-- Pilih Batch --</option>
+                    <label class="block text-sm font-medium">
+                        Pilih Batch Tabur
+                    </label>
+
+                    <select
+                        id="s-batch"
+                        required
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
+                        <option value="">Memuat batch...</option>
                     </select>
                 </div>
+
                 <div>
-                    <label class="block text-sm font-medium">Ukuran / Tinggi Bibit</label>
-                    <input type="text" id="s-ukuran" required placeholder="Contoh: 20–30 cm atau 80–100 cm" class="w-full mt-1 p-3 border rounded-xl">
+                    <label class="block text-sm font-medium">
+                        Ukuran / Tinggi Bibit
+                    </label>
+
+                    <input
+                        type="text"
+                        id="s-ukuran"
+                        required
+                        placeholder="Contoh: 20–30 cm atau 80–100 cm"
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
                 </div>
+
                 <div>
-                    <label class="block text-sm font-medium">Tanggal Penyapihan</label>
-                    <input type="date" id="s-tanggal" required class="w-full mt-1 p-3 border rounded-xl">
+                    <label class="block text-sm font-medium">
+                        Tanggal Penyapihan
+                    </label>
+
+                    <input
+                        type="date"
+                        id="s-tanggal"
+                        required
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
                 </div>
+
                 <div>
-                    <label class="block text-sm font-medium">Jumlah Kecambah Disapih</label>
-                    <input type="number" id="s-jumlah" required placeholder="4200" class="w-full mt-1 p-3 border rounded-xl">
+                    <label class="block text-sm font-medium">
+                        Jumlah Kecambah Disapih
+                    </label>
+
+                    <input
+                        type="number"
+                        id="s-jumlah"
+                        min="1"
+                        step="1"
+                        required
+                        placeholder="Contoh: 4200"
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
                 </div>
+
                 <div>
-                    <label class="block text-sm font-medium">Lokasi Bedeng Sapih</label>
-                    <input type="text" id="s-lokasi" required placeholder="Bedeng Sapih B3" class="w-full mt-1 p-3 border rounded-xl">
+                    <label class="block text-sm font-medium">
+                        Lokasi Bedeng Sapih
+                    </label>
+
+                    <input
+                        type="text"
+                        id="s-lokasi"
+                        required
+                        placeholder="Bedeng Sapih B3"
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
                 </div>
-                <button type="submit" class="w-full bg-emerald-700 text-white p-3 rounded-xl font-medium cursor-pointer">Simpan ke Cloud</button>
+
+                <button
+                    type="submit"
+                    class="w-full bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium cursor-pointer disabled:opacity-50"
+                >
+                    Simpan ke Cloud
+                </button>
+
             </form>
         </div>
 
         <div class="bg-white p-6 rounded-2xl shadow">
-            <h3 class="text-lg font-bold text-emerald-900 mb-4">Riwayat Penyapihan Bibit</h3>
+            <h3 class="text-lg font-bold text-emerald-900 mb-4">
+                Riwayat Penyapihan Bibit
+            </h3>
+
             <div class="overflow-x-auto">
                 <table class="w-full text-left border-collapse text-sm">
+
                     <thead>
                         <tr class="bg-emerald-100 text-emerald-900">
                             <th class="p-3">No</th>
@@ -132,12 +331,20 @@ import { collection, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/
                             <th class="p-3">Jumlah Disapih</th>
                         </tr>
                     </thead>
+
                     <tbody id="tabel-data">
-                        <tr><td colspan="6" class="p-4 text-center text-slate-400">Memuat data...</td></tr>
+                        <tr>
+                            <td colspan="6" class="p-4 text-center text-slate-400">
+                                Memuat data...
+                            </td>
+                        </tr>
                     </tbody>
+
                 </table>
             </div>
         </div>
+
     </main>
+
 </body>
 </html>
