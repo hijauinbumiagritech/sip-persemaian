@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -5,96 +6,237 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Perawatan - SIP</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
     <script type="module">
-
         import { db, requireAuth } from "./firebase.js";
+        import {
+            collection,
+            addDoc,
+            getDocs,
+            query,
+            orderBy
+        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-import { collection, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-
-
-        
-        if (!(await requireAuth())) throw new Error('Login diperlukan.');
-window.simpanData = async function(e) {
-            e.preventDefault();
-            try {
-                await addDoc(collection(db, "perawatan"), {
-                    tanggal: document.getElementById('p-tanggal').value,
-                    jenis: document.getElementById('p-jenis').value,
-                    lokasi: document.getElementById('p-lokasi').value,
-                    catatan: document.getElementById('p-catatan').value,
-                    timestamp: new Date()
-                });
-                alert('Log perawatan berhasil disimpan ke Cloud!');
-                window.location.href = 'index.html';
-            } catch (error) {
-                alert('Gagal menyimpan.');
-            }
+        if (!(await requireAuth())) {
+            throw new Error("Login diperlukan.");
         }
 
+        const tabelData = document.getElementById("tabel-data");
+        const formPerawatan = document.getElementById("form-perawatan");
+
+        // Memuat riwayat perawatan
         async function muatTabel() {
             try {
-                const querySnapshot = await getDocs(collection(db, "perawatan"));
-                let tbody = document.getElementById('tabel-data');
-                tbody.innerHTML = "";
-                let no = 1;
-                querySnapshot.forEach((doc) => {
-                    let d = doc.data();
-                    tbody.innerHTML += `
-                        <tr class="border-b">
-                            <td class="p-3">${no++}</td>
-                            <td class="p-3">${d.tanggal}</td>
-                            <td class="p-3 font-medium">${d.jenis}</td>
-                            <td class="p-3">${d.lokasi}</td>
-                            <td class="p-3 text-slate-600">${d.catatan || '-'}</td>
+                const q = query(
+                    collection(db, "perawatan"),
+                    orderBy("tanggal", "desc")
+                );
+
+                const querySnapshot = await getDocs(q);
+
+                tabelData.innerHTML = "";
+
+                if (querySnapshot.empty) {
+                    tabelData.innerHTML = `
+                        <tr>
+                            <td colspan="5" class="p-4 text-center text-slate-400">
+                                Belum ada riwayat perawatan.
+                            </td>
                         </tr>
                     `;
+                    return;
+                }
+
+                let no = 1;
+
+                querySnapshot.forEach((doc) => {
+                    const d = doc.data();
+
+                    const tr = document.createElement("tr");
+                    tr.className = "border-b hover:bg-emerald-50";
+
+                    const tdNo = document.createElement("td");
+                    tdNo.className = "p-3";
+                    tdNo.textContent = no++;
+
+                    const tdTanggal = document.createElement("td");
+                    tdTanggal.className = "p-3";
+                    tdTanggal.textContent = d.tanggal || "-";
+
+                    const tdJenis = document.createElement("td");
+                    tdJenis.className = "p-3 font-medium";
+                    tdJenis.textContent = d.jenis || "-";
+
+                    const tdLokasi = document.createElement("td");
+                    tdLokasi.className = "p-3";
+                    tdLokasi.textContent = d.lokasi || "-";
+
+                    const tdCatatan = document.createElement("td");
+                    tdCatatan.className = "p-3 text-slate-600";
+                    tdCatatan.textContent = d.catatan || "-";
+
+                    tr.append(
+                        tdNo,
+                        tdTanggal,
+                        tdJenis,
+                        tdLokasi,
+                        tdCatatan
+                    );
+
+                    tabelData.appendChild(tr);
                 });
-            } catch (e) {
-                console.error("Gagal memuat tabel:", e);
+
+            } catch (error) {
+                console.error("Gagal memuat tabel perawatan:", error);
+
+                tabelData.innerHTML = `
+                    <tr>
+                        <td colspan="5" class="p-4 text-center text-red-600">
+                            Gagal memuat data: ${error.message}
+                        </td>
+                    </tr>
+                `;
             }
         }
-        window.onload = muatTabel;
+
+        // Muat tabel setelah autentikasi berhasil
+        await muatTabel();
+
+        // Menyimpan data perawatan
+        window.simpanData = async function(e) {
+            e.preventDefault();
+
+            const tanggal = document.getElementById("p-tanggal").value;
+            const jenis = document.getElementById("p-jenis").value;
+            const lokasi = document.getElementById("p-lokasi").value.trim();
+            const catatan = document.getElementById("p-catatan").value.trim();
+
+            if (!tanggal || !jenis || !lokasi) {
+                alert("Tanggal, jenis kegiatan, dan lokasi wajib diisi.");
+                return;
+            }
+
+            const tombol = formPerawatan.querySelector('button[type="submit"]');
+            tombol.disabled = true;
+            tombol.textContent = "Menyimpan...";
+
+            try {
+                await addDoc(collection(db, "perawatan"), {
+                    tanggal: tanggal,
+                    jenis: jenis,
+                    lokasi: lokasi,
+                    catatan: catatan,
+                    timestamp: new Date()
+                });
+
+                alert("Log perawatan berhasil disimpan ke Cloud!");
+                window.location.href = "index.html";
+
+            } catch (error) {
+                console.error("Gagal menyimpan perawatan:", error);
+                alert("Gagal menyimpan data: " + error.message);
+
+                tombol.disabled = false;
+                tombol.textContent = "Simpan ke Cloud";
+            }
+        };
     </script>
 </head>
+
 <body class="bg-emerald-50 text-slate-800 font-sans min-h-screen">
+
     <header class="bg-emerald-800 text-white shadow-md">
         <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
             <h1 class="text-xl font-bold">🌱 SIP - Log Perawatan</h1>
-            <a href="index.html" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">Kembali</a>
+
+            <a href="index.html" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">
+                Kembali
+            </a>
         </div>
     </header>
+
     <main class="max-w-4xl mx-auto px-4 py-8 space-y-8">
+
         <div class="bg-white p-6 rounded-2xl shadow">
-            <h2 class="text-xl font-bold text-emerald-900 mb-4">Catat Jadwal Penyiraman & Pemupukan</h2>
-            <form onsubmit="simpanData(event)" class="space-y-4">
+            <h2 class="text-xl font-bold text-emerald-900 mb-4">
+                Catat Jadwal Penyiraman & Pemupukan
+            </h2>
+
+            <form id="form-perawatan" onsubmit="simpanData(event)" class="space-y-4">
+
                 <div>
-                    <label class="block text-sm font-medium">Tanggal Kegiatan</label>
-                    <input type="date" id="p-tanggal" required class="w-full mt-1 p-3 border rounded-xl">
+                    <label class="block text-sm font-medium">
+                        Tanggal Kegiatan
+                    </label>
+
+                    <input
+                        type="date"
+                        id="p-tanggal"
+                        required
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
                 </div>
+
                 <div>
-                    <label class="block text-sm font-medium">Jenis Kegiatan</label>
-                    <select id="p-jenis" class="w-full mt-1 p-3 border rounded-xl">
+                    <label class="block text-sm font-medium">
+                        Jenis Kegiatan
+                    </label>
+
+                    <select
+                        id="p-jenis"
+                        required
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
                         <option value="Penyiraman Rutin">Penyiraman Rutin</option>
                         <option value="Pemupukan NPK/Organik">Pemupukan NPK/Organik</option>
                         <option value="Penyemprotan Pestisida">Penyemprotan Pestisida</option>
                     </select>
                 </div>
+
                 <div>
-                    <label class="block text-sm font-medium">Lokasi Blok / Bedeng</label>
-                    <input type="text" id="p-lokasi" required placeholder="Blok B3" class="w-full mt-1 p-3 border rounded-xl">
+                    <label class="block text-sm font-medium">
+                        Lokasi Blok / Bedeng
+                    </label>
+
+                    <input
+                        type="text"
+                        id="p-lokasi"
+                        required
+                        placeholder="Contoh: Blok B3"
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
                 </div>
+
                 <div>
-                    <label class="block text-sm font-medium">Catatan / Dosis</label>
-                    <textarea id="p-catatan" placeholder="Dosis 2 gram per liter air" class="w-full mt-1 p-3 border rounded-xl"></textarea>
+                    <label class="block text-sm font-medium">
+                        Catatan / Dosis
+                    </label>
+
+                    <textarea
+                        id="p-catatan"
+                        placeholder="Contoh: Dosis 2 gram per liter air"
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    ></textarea>
                 </div>
-                <button type="submit" class="w-full bg-emerald-700 text-white p-3 rounded-xl font-medium cursor-pointer">Simpan ke Cloud</button>
+
+                <button
+                    type="submit"
+                    class="w-full bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium cursor-pointer disabled:opacity-50"
+                >
+                    Simpan ke Cloud
+                </button>
+
             </form>
         </div>
 
         <div class="bg-white p-6 rounded-2xl shadow">
-            <h3 class="text-lg font-bold text-emerald-900 mb-4">Riwayat Log Perawatan</h3>
+            <h3 class="text-lg font-bold text-emerald-900 mb-4">
+                Riwayat Log Perawatan
+            </h3>
+
             <div class="overflow-x-auto">
                 <table class="w-full text-left border-collapse text-sm">
+
                     <thead>
                         <tr class="bg-emerald-100 text-emerald-900">
                             <th class="p-3">No</th>
@@ -104,12 +246,20 @@ window.simpanData = async function(e) {
                             <th class="p-3">Catatan</th>
                         </tr>
                     </thead>
+
                     <tbody id="tabel-data">
-                        <tr><td colspan="5" class="p-4 text-center text-slate-400">Memuat data...</td></tr>
+                        <tr>
+                            <td colspan="5" class="p-4 text-center text-slate-400">
+                                Memuat data...
+                            </td>
+                        </tr>
                     </tbody>
+
                 </table>
             </div>
         </div>
+
     </main>
+
 </body>
 </html>
