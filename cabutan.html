@@ -1,77 +1,298 @@
+
 <!DOCTYPE html>
 <html lang="id">
 <head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sumber Benih Cabutan - SIP</title>
-  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-  <script type="module">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sumber Benih Cabutan - SIP</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 
+    <script type="module">
         import { db, requireAuth } from "./firebase.js";
 
-import { collection, addDoc, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import {
+            collection,
+            addDoc,
+            getDocs,
+            query,
+            orderBy
+        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-    
-        if (!(await requireAuth())) throw new Error('Login diperlukan.');
-async function muatData() {
-      const snap = await getDocs(query(collection(db, "cabutan_bibit"), orderBy("tanggal", "desc")));
-      const tbody = document.getElementById("tabel-data"); tbody.innerHTML = "";
-      let no = 1;
-      snap.forEach(doc => {
-        const d = doc.data();
-        tbody.innerHTML += `<tr class="border-b"><td class="p-3">${no++}</td><td class="p-3">${d.batch}</td>
-          <td class="p-3">${d.jenis}</td><td class="p-3">${d.ukuran || 'Belum dicatat'}</td><td class="p-3">${d.tanggal}</td><td class="p-3">${d.asal}</td>
-          <td class="p-3 font-semibold text-emerald-700">${d.jumlah} Bibit</td><td class="p-3">${d.lokasi || '-'}</td></tr>`;
-      });
-      if (!snap.size) tbody.innerHTML = '<tr><td colspan="8" class="p-4 text-center text-slate-400">Belum ada data cabutan.</td></tr>';
-    }
-    window.simpanData = async function(e) {
-      e.preventDefault();
-      const jumlah = Number(document.getElementById("c-jumlah").value);
-      if (!Number.isInteger(jumlah) || jumlah <= 0) { alert("Jumlah bibit harus lebih dari 0."); return; }
-      try {
-        await addDoc(collection(db, "cabutan_bibit"), {
-          batch: document.getElementById("c-batch").value.trim(),
-          jenis: document.getElementById("c-jenis").value.trim(),
-          ukuran: document.getElementById("c-ukuran").value.trim(),
-          tanggal: document.getElementById("c-tanggal").value,
-          asal: document.getElementById("c-asal").value.trim(),
-          jumlah,
-          lokasi: document.getElementById("c-lokasi").value.trim(),
-          keterangan: document.getElementById("c-keterangan").value.trim(),
-          sumber: "Cabutan", timestamp: new Date()
-        });
-        alert("Data sumber benih cabutan berhasil disimpan.");
-        window.location.reload();
-      } catch (err) { console.error(err); alert("Gagal menyimpan data cabutan."); }
-    };
-    window.onload = muatData;
-  </script>
+        // Memastikan pengguna sudah login
+        if (!(await requireAuth())) {
+            throw new Error("Login diperlukan.");
+        }
+
+        // Fungsi memuat riwayat data cabutan
+        async function muatData() {
+            const tbody = document.getElementById("tabel-data");
+
+            try {
+                const q = query(
+                    collection(db, "cabutan_bibit"),
+                    orderBy("tanggal", "desc")
+                );
+
+                const snap = await getDocs(q);
+
+                tbody.innerHTML = "";
+
+                if (snap.empty) {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="8" class="p-4 text-center text-slate-400">
+                                Belum ada data cabutan.
+                            </td>
+                        </tr>
+                    `;
+                    return;
+                }
+
+                let no = 1;
+
+                snap.forEach((doc) => {
+                    const d = doc.data();
+
+                    tbody.innerHTML += `
+                        <tr class="border-b">
+                            <td class="p-3">${no++}</td>
+                            <td class="p-3">${d.batch || "-"}</td>
+                            <td class="p-3">${d.jenis || "-"}</td>
+                            <td class="p-3">${d.ukuran || "Belum dicatat"}</td>
+                            <td class="p-3">${d.tanggal || "-"}</td>
+                            <td class="p-3">${d.asal || "-"}</td>
+                            <td class="p-3 font-semibold text-emerald-700">
+                                ${d.jumlah ?? 0} Bibit
+                            </td>
+                            <td class="p-3">${d.lokasi || "-"}</td>
+                        </tr>
+                    `;
+                });
+
+            } catch (error) {
+                console.error("Gagal memuat data cabutan:", error);
+
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="8" class="p-4 text-center text-red-600">
+                            Gagal memuat data. Periksa koneksi dan akses Firestore.
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+
+        // Fungsi menyimpan data cabutan
+        window.simpanData = async function(e) {
+            e.preventDefault();
+
+            const jumlah = Number(
+                document.getElementById("c-jumlah").value
+            );
+
+            if (!Number.isInteger(jumlah) || jumlah <= 0) {
+                alert("Jumlah bibit harus berupa bilangan bulat lebih dari 0.");
+                return;
+            }
+
+            const tanggal = document.getElementById("c-tanggal").value;
+            const batch = document.getElementById("c-batch").value.trim();
+            const jenis = document.getElementById("c-jenis").value.trim();
+            const ukuran = document.getElementById("c-ukuran").value.trim();
+            const asal = document.getElementById("c-asal").value.trim();
+
+            if (!tanggal || !batch || !jenis || !ukuran || !asal) {
+                alert("Mohon lengkapi seluruh data yang wajib diisi.");
+                return;
+            }
+
+            try {
+                await addDoc(collection(db, "cabutan_bibit"), {
+                    batch: batch,
+                    jenis: jenis,
+                    ukuran: ukuran,
+                    tanggal: tanggal,
+                    asal: asal,
+                    jumlah: jumlah,
+                    lokasi: document.getElementById("c-lokasi").value.trim(),
+                    keterangan: document.getElementById("c-keterangan").value.trim(),
+                    sumber: "Cabutan",
+                    timestamp: new Date()
+                });
+
+                alert("Data sumber benih cabutan berhasil disimpan.");
+
+                window.location.reload();
+
+            } catch (error) {
+                console.error("Gagal menyimpan data cabutan:", error);
+                alert("Gagal menyimpan data: " + error.message);
+            }
+        };
+
+        // Memuat tabel setelah autentikasi selesai
+        await muatData();
+    </script>
 </head>
+
 <body class="bg-emerald-50 text-slate-800 font-sans min-h-screen">
-<header class="bg-emerald-800 text-white shadow-md"><div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-  <h1 class="text-xl font-bold">🌱 SIP - Sumber Benih Cabutan</h1><a href="index.html" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">Kembali</a>
-</div></header>
-<main class="max-w-6xl mx-auto px-4 py-8 space-y-8">
-  <section class="bg-white p-6 rounded-2xl shadow">
-    <h2 class="text-xl font-bold text-emerald-900 mb-4">Pencatatan Bibit dari Cabutan Alam</h2>
-    <p class="text-sm text-slate-500 mb-4">Gunakan halaman ini untuk anakan/bibit yang diperoleh melalui cabutan, bukan melalui media tabur.</p>
-    <form onsubmit="simpanData(event)" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div><label class="block text-sm font-medium">Kode Batch Cabutan</label><input id="c-batch" required placeholder="CAB-PULAI-001" class="w-full mt-1 p-3 border rounded-xl"></div>
-      <div><label class="block text-sm font-medium">Jenis Tanaman</label><input id="c-jenis" required placeholder="Nama lokal / nama ilmiah" class="w-full mt-1 p-3 border rounded-xl"></div>
-      <div><label class="block text-sm font-medium">Ukuran / Tinggi Bibit</label><input id="c-ukuran" required placeholder="Contoh: 20–30 cm atau 80–100 cm" class="w-full mt-1 p-3 border rounded-xl"></div>
-      <div><label class="block text-sm font-medium">Tanggal Cabutan</label><input id="c-tanggal" type="date" required class="w-full mt-1 p-3 border rounded-xl"></div>
-      <div><label class="block text-sm font-medium">Jumlah Bibit</label><input id="c-jumlah" type="number" min="1" step="1" required placeholder="500" class="w-full mt-1 p-3 border rounded-xl"></div>
-      <div><label class="block text-sm font-medium">Asal / Lokasi Cabutan</label><input id="c-asal" required placeholder="Contoh: Areal regenerasi alami Blok A" class="w-full mt-1 p-3 border rounded-xl"></div>
-      <div><label class="block text-sm font-medium">Lokasi Penampungan / Bedeng</label><input id="c-lokasi" placeholder="Bedeng Cabutan C1" class="w-full mt-1 p-3 border rounded-xl"></div>
-      <div class="md:col-span-2"><label class="block text-sm font-medium">Keterangan</label><textarea id="c-keterangan" rows="2" class="w-full mt-1 p-3 border rounded-xl" placeholder="Kondisi bibit, kegiatan aklimatisasi, dan catatan lainnya"></textarea></div>
-      <div class="md:col-span-2"><button class="w-full bg-emerald-700 text-white p-3 rounded-xl font-medium">Simpan Data Cabutan</button></div>
-    </form>
-  </section>
-  <section class="bg-white p-6 rounded-2xl shadow">
-    <h3 class="text-lg font-bold text-emerald-900 mb-4">Riwayat Sumber Benih Cabutan</h3>
-    <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr class="bg-emerald-100 text-emerald-900">
-      <th class="p-3">No</th><th class="p-3">Batch</th><th class="p-3">Jenis</th><th class="p-3">Ukuran</th><th class="p-3">Tanggal</th><th class="p-3">Asal Cabutan</th><th class="p-3">Jumlah</th><th class="p-3">Bedeng</th>
-    </tr></thead><tbody id="tabel-data"><tr><td colspan="7" class="p-4 text-center">Memuat data...</td></tr></tbody></table></div>
-  </section>
-</main>
-</body></html>
+
+    <header class="bg-emerald-800 text-white shadow-md">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+            <h1 class="text-xl font-bold">
+                🌱 SIP - Sumber Benih Cabutan
+            </h1>
+
+            <a href="index.html" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">
+                Kembali
+            </a>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 py-8 space-y-8">
+
+        <section class="bg-white p-6 rounded-2xl shadow">
+            <h2 class="text-xl font-bold text-emerald-900 mb-4">
+                Pencatatan Bibit dari Cabutan Alam
+            </h2>
+
+            <p class="text-sm text-slate-500 mb-4">
+                Gunakan halaman ini untuk anakan/bibit yang diperoleh melalui cabutan,
+                bukan melalui media tabur.
+            </p>
+
+            <form onsubmit="simpanData(event)" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                <div>
+                    <label class="block text-sm font-medium">Kode Batch Cabutan</label>
+                    <input
+                        id="c-batch"
+                        required
+                        placeholder="CAB-PULAI-001"
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium">Jenis Tanaman</label>
+                    <input
+                        id="c-jenis"
+                        required
+                        placeholder="Nama lokal / nama ilmiah"
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium">Ukuran / Tinggi Bibit</label>
+                    <input
+                        id="c-ukuran"
+                        required
+                        placeholder="Contoh: 20–30 cm atau 80–100 cm"
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium">Tanggal Cabutan</label>
+                    <input
+                        id="c-tanggal"
+                        type="date"
+                        required
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium">Jumlah Bibit</label>
+                    <input
+                        id="c-jumlah"
+                        type="number"
+                        min="1"
+                        step="1"
+                        required
+                        placeholder="500"
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium">Asal / Lokasi Cabutan</label>
+                    <input
+                        id="c-asal"
+                        required
+                        placeholder="Contoh: Areal regenerasi alami Blok A"
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium">
+                        Lokasi Penampungan / Bedeng
+                    </label>
+                    <input
+                        id="c-lokasi"
+                        placeholder="Bedeng Cabutan C1"
+                        class="w-full mt-1 p-3 border rounded-xl"
+                    >
+                </div>
+
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium">Keterangan</label>
+                    <textarea
+                        id="c-keterangan"
+                        rows="2"
+                        class="w-full mt-1 p-3 border rounded-xl"
+                        placeholder="Kondisi bibit, kegiatan aklimatisasi, dan catatan lainnya"
+                    ></textarea>
+                </div>
+
+                <div class="md:col-span-2">
+                    <button
+                        type="submit"
+                        class="w-full bg-emerald-700 text-white p-3 rounded-xl font-medium cursor-pointer"
+                    >
+                        Simpan Data Cabutan
+                    </button>
+                </div>
+
+            </form>
+        </section>
+
+        <section class="bg-white p-6 rounded-2xl shadow">
+            <h3 class="text-lg font-bold text-emerald-900 mb-4">
+                Riwayat Sumber Benih Cabutan
+            </h3>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm border-collapse">
+
+                    <thead>
+                        <tr class="bg-emerald-100 text-emerald-900">
+                            <th class="p-3">No</th>
+                            <th class="p-3">Batch</th>
+                            <th class="p-3">Jenis</th>
+                            <th class="p-3">Ukuran</th>
+                            <th class="p-3">Tanggal</th>
+                            <th class="p-3">Asal Cabutan</th>
+                            <th class="p-3">Jumlah</th>
+                            <th class="p-3">Bedeng</th>
+                        </tr>
+                    </thead>
+
+                    <tbody id="tabel-data">
+                        <tr>
+                            <td colspan="8" class="p-4 text-center text-slate-400">
+                                Memuat data...
+                            </td>
+                        </tr>
+                    </tbody>
+
+                </table>
+            </div>
+        </section>
+
+    </main>
+
+</body>
+</html>
