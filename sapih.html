@@ -19,114 +19,192 @@
             throw new Error("Login diperlukan.");
         }
 
-        // Peta stok dan jenis benih berdasarkan batch
-        let petaStokTabur = {};
-        let petaJenisTabur = {};
-
         const selectBatch = document.getElementById("s-batch");
         const tabelData = document.getElementById("tabel-data");
         const formSapih = document.getElementById("form-sapih");
+        const inputJumlah = document.getElementById("s-jumlah");
 
-        // Memuat pilihan batch dan riwayat penyapihan
+        let petaStokTabur = {};
+        let petaJenisTabur = {};
+        let dataSapih = [];
+        let dataCabutan = [];
+        let totalMedia = 0;
+        let totalSapih = 0;
+        let totalCabutan = 0;
+
+        const angka = (nilai) =>
+            (Number(nilai) || 0).toLocaleString("id-ID");
+
+        function tampilkanRingkasan() {
+            const sudahDigunakan = totalSapih + totalCabutan;
+            const sisaMedia = totalMedia - sudahDigunakan;
+
+            document.getElementById("total-media").textContent = angka(totalMedia);
+            document.getElementById("total-sapih").textContent = angka(totalSapih);
+            document.getElementById("total-cabutan").textContent = angka(totalCabutan);
+            document.getElementById("total-terpakai").textContent = angka(sudahDigunakan);
+            document.getElementById("sisa-media").textContent = angka(sisaMedia);
+
+            const peringatan = document.getElementById("peringatan-stok");
+
+            if (sisaMedia < 0) {
+                peringatan.classList.remove("hidden");
+                peringatan.textContent =
+                    `PERINGATAN: Penggunaan polybag melebihi stok media sebanyak ${angka(Math.abs(sisaMedia))} polybag. Transaksi penyapihan baru tidak dapat dilakukan.`;
+            } else {
+                peringatan.classList.add("hidden");
+                peringatan.textContent = "";
+            }
+        }
+
+        function hitungStokBatch(batch) {
+            const stokAwal = Number(petaStokTabur[batch]) || 0;
+
+            const sudahDisapih = dataSapih
+                .filter(d => d.batch === batch)
+                .reduce((total, d) => total + (Number(d.jumlah) || 0), 0);
+
+            return stokAwal - sudahDisapih;
+        }
+
+        function muatPilihanBatch() {
+            selectBatch.innerHTML = '<option value="">-- Pilih Batch --</option>';
+
+            const daftarBatch = Object.keys(petaStokTabur);
+
+            daftarBatch.forEach(kode => {
+                const sisa = hitungStokBatch(kode);
+                const option = document.createElement("option");
+
+                option.value = kode;
+                option.textContent =
+                    `${kode} - ${petaJenisTabur[kode]} (Sisa kecambah: ${angka(sisa)})`;
+
+                if (sisa <= 0) {
+                    option.disabled = true;
+                }
+
+                selectBatch.appendChild(option);
+            });
+
+            if (daftarBatch.length === 0) {
+                selectBatch.innerHTML =
+                    '<option value="">Belum ada batch tabur benih</option>';
+            }
+        }
+
+        function tampilkanRiwayat() {
+            tabelData.innerHTML = "";
+
+            const daftar = [...dataSapih].sort((a, b) =>
+                String(b.tanggal || "").localeCompare(String(a.tanggal || ""))
+            );
+
+            if (daftar.length === 0) {
+                tabelData.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="p-4 text-center text-slate-400">
+                            Belum ada riwayat penyapihan.
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            daftar.forEach((d, index) => {
+                const tr = document.createElement("tr");
+                tr.className = "border-b hover:bg-emerald-50";
+
+                const isi = [
+                    index + 1,
+                    d.batch || "-",
+                    d.ukuran || "Belum dicatat",
+                    d.tanggal || "-",
+                    d.lokasi || "-",
+                    `${angka(d.jumlah)} Bibit`
+                ];
+
+                isi.forEach((nilai, i) => {
+                    const td = document.createElement("td");
+                    td.className = "p-3";
+                    td.textContent = nilai;
+
+                    if (i === 1) td.classList.add("font-medium");
+                    if (i === 5) {
+                        td.classList.add("font-semibold", "text-emerald-700");
+                    }
+
+                    tr.appendChild(td);
+                });
+
+                tabelData.appendChild(tr);
+            });
+        }
+
         async function loadDataAwal() {
             try {
-                // 1. Memuat batch tabur benih
-                const snapTabur = await getDocs(collection(db, "tabur_benih"));
-
-                selectBatch.innerHTML = `
-                    <option value="">-- Pilih Batch --</option>
+                tabelData.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="p-4 text-center text-slate-400">
+                            Memuat data...
+                        </td>
+                    </tr>
                 `;
 
-                const daftarBatch = new Set();
+                const [
+                    snapTabur,
+                    snapSapih,
+                    snapCabutan,
+                    snapMedia
+                ] = await Promise.all([
+                    getDocs(collection(db, "tabur_benih")),
+                    getDocs(collection(db, "penyapihan")),
+                    getDocs(collection(db, "cabutan_bibit")),
+                    getDocs(collection(db, "isi_polybag"))
+                ]);
 
-                snapTabur.forEach((doc) => {
+                // Stok tabur dikelompokkan berdasarkan kode batch.
+                petaStokTabur = {};
+                petaJenisTabur = {};
+
+                snapTabur.forEach(doc => {
                     const d = doc.data();
-
                     if (!d.kode) return;
 
-                    petaStokTabur[d.kode] = Number(d.jumlah) || 0;
+                    petaStokTabur[d.kode] =
+                        (petaStokTabur[d.kode] || 0) + (Number(d.jumlah) || 0);
+
                     petaJenisTabur[d.kode] = d.jenis || "Tidak diketahui";
-
-                    if (!daftarBatch.has(d.kode)) {
-                        daftarBatch.add(d.kode);
-
-                        const option = document.createElement("option");
-                        option.value = d.kode;
-                        option.textContent =
-                            `${d.kode} - ${d.jenis || "Tidak diketahui"} (Stok: ${Number(d.jumlah) || 0})`;
-
-                        selectBatch.appendChild(option);
-                    }
                 });
 
-                if (daftarBatch.size === 0) {
-                    selectBatch.innerHTML = `
-                        <option value="">Belum ada batch tabur benih</option>
-                    `;
-                }
+                dataSapih = snapSapih.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
 
-                // 2. Memuat riwayat penyapihan
-                const snapSapih = await getDocs(collection(db, "penyapihan"));
+                dataCabutan = snapCabutan.docs.map(doc => doc.data());
 
-                tabelData.innerHTML = "";
+                totalMedia = snapMedia.docs.reduce(
+                    (total, doc) => total + (Number(doc.data().jumlah) || 0),
+                    0
+                );
 
-                if (snapSapih.empty) {
-                    tabelData.innerHTML = `
-                        <tr>
-                            <td colspan="6" class="p-4 text-center text-slate-400">
-                                Belum ada riwayat penyapihan.
-                            </td>
-                        </tr>
-                    `;
-                    return;
-                }
+                totalSapih = dataSapih.reduce(
+                    (total, d) => total + (Number(d.jumlah) || 0),
+                    0
+                );
 
-                let no = 1;
+                totalCabutan = dataCabutan.reduce(
+                    (total, d) => total + (Number(d.jumlah) || 0),
+                    0
+                );
 
-                snapSapih.forEach((doc) => {
-                    const d = doc.data();
-
-                    const tr = document.createElement("tr");
-                    tr.className = "border-b hover:bg-emerald-50";
-
-                    const tdNo = document.createElement("td");
-                    tdNo.className = "p-3";
-                    tdNo.textContent = no++;
-
-                    const tdBatch = document.createElement("td");
-                    tdBatch.className = "p-3 font-medium";
-                    tdBatch.textContent = d.batch || "-";
-
-                    const tdUkuran = document.createElement("td");
-                    tdUkuran.className = "p-3";
-                    tdUkuran.textContent = d.ukuran || "Belum dicatat";
-
-                    const tdTanggal = document.createElement("td");
-                    tdTanggal.className = "p-3";
-                    tdTanggal.textContent = d.tanggal || "-";
-
-                    const tdLokasi = document.createElement("td");
-                    tdLokasi.className = "p-3";
-                    tdLokasi.textContent = d.lokasi || "-";
-
-                    const tdJumlah = document.createElement("td");
-                    tdJumlah.className = "p-3 font-semibold text-emerald-700";
-                    tdJumlah.textContent = `${d.jumlah ?? 0} Bibit`;
-
-                    tr.append(
-                        tdNo,
-                        tdBatch,
-                        tdUkuran,
-                        tdTanggal,
-                        tdLokasi,
-                        tdJumlah
-                    );
-
-                    tabelData.appendChild(tr);
-                });
+                tampilkanRingkasan();
+                muatPilihanBatch();
+                tampilkanRiwayat();
 
             } catch (error) {
-                console.error("Gagal memuat data penyapihan:", error);
+                console.error("Gagal memuat data:", error);
 
                 tabelData.innerHTML = `
                     <tr>
@@ -136,22 +214,30 @@
                     </tr>
                 `;
 
-                alert("Gagal memuat data penyapihan. Periksa koneksi atau Firestore.");
+                alert("Gagal memuat data. Periksa koneksi atau Firestore.");
             }
         }
 
-        // Memuat data setelah autentikasi berhasil
         await loadDataAwal();
 
-        // Menyimpan data penyapihan
+        selectBatch.addEventListener("change", () => {
+            const batch = selectBatch.value;
+            const info = document.getElementById("info-batch");
+
+            if (!batch) {
+                info.textContent = "";
+                return;
+            }
+
+            info.textContent =
+                `Sisa kecambah pada batch ini: ${angka(hitungStokBatch(batch))}`;
+        });
+
         window.simpanData = async function(e) {
             e.preventDefault();
 
             const batchPilihan = selectBatch.value;
-            const jumlahDisapih = Number(
-                document.getElementById("s-jumlah").value
-            );
-
+            const jumlahDisapih = Number(inputJumlah.value);
             const ukuran = document.getElementById("s-ukuran").value.trim();
             const tanggal = document.getElementById("s-tanggal").value;
             const lokasi = document.getElementById("s-lokasi").value.trim();
@@ -171,21 +257,46 @@
                 return;
             }
 
-            const stokMaksimal = petaStokTabur[batchPilihan] || 0;
-
-            // Validasi jumlah terhadap stok batch tabur
-            if (jumlahDisapih > stokMaksimal) {
-                alert(
-                    `Peringatan: Jumlah disapih (${jumlahDisapih}) melebihi stok benih tabur pada batch ${batchPilihan} (${stokMaksimal})!`
-                );
-                return;
-            }
-
+            // Muat ulang data stok sebelum validasi penyimpanan.
             const tombol = formSapih.querySelector('button[type="submit"]');
             tombol.disabled = true;
-            tombol.textContent = "Menyimpan...";
+            tombol.textContent = "Memeriksa stok...";
 
             try {
+                await loadDataAwal();
+
+                const stokBatchTersisa = hitungStokBatch(batchPilihan);
+
+                if (jumlahDisapih > stokBatchTersisa) {
+                    alert(
+                        `Stok kecambah batch ${batchPilihan} tidak mencukupi.\n` +
+                        `Sisa kecambah: ${angka(stokBatchTersisa)}\n` +
+                        `Jumlah yang akan disapih: ${angka(jumlahDisapih)}`
+                    );
+                    return;
+                }
+
+                const sisaMedia =
+                    totalMedia - totalSapih - totalCabutan;
+
+                if (sisaMedia < 0) {
+                    alert(
+                        "Transaksi tidak dapat dilakukan karena penggunaan polybag sudah melebihi stok media."
+                    );
+                    return;
+                }
+
+                if (jumlahDisapih > sisaMedia) {
+                    alert(
+                        `Stok polybag bermedia tidak mencukupi.\n` +
+                        `Sisa polybag bermedia: ${angka(sisaMedia)}\n` +
+                        `Jumlah penyapihan: ${angka(jumlahDisapih)}`
+                    );
+                    return;
+                }
+
+                tombol.textContent = "Menyimpan...";
+
                 await addDoc(collection(db, "penyapihan"), {
                     batch: batchPilihan,
                     jenis: petaJenisTabur[batchPilihan] || "Tidak diketahui",
@@ -197,13 +308,18 @@
                     timestamp: new Date()
                 });
 
-                alert("Penyapihan berhasil disimpan ke Cloud!");
-                window.location.href = "index.html";
+                alert("Data penyapihan berhasil disimpan.");
+
+                formSapih.reset();
+                document.getElementById("info-batch").textContent = "";
+
+                await loadDataAwal();
 
             } catch (error) {
                 console.error("Gagal menyimpan penyapihan:", error);
                 alert("Gagal menyimpan data: " + error.message);
 
+            } finally {
                 tombol.disabled = false;
                 tombol.textContent = "Simpan ke Cloud";
             }
@@ -223,9 +339,51 @@
         </div>
     </header>
 
-    <main class="max-w-4xl mx-auto px-4 py-8 space-y-8">
+    <main class="max-w-7xl mx-auto px-4 py-8 space-y-8">
 
-        <div class="bg-white p-6 rounded-2xl shadow">
+        <section>
+            <h2 class="text-xl font-bold text-emerald-900 mb-4">
+                Ringkasan Stok Polybag Bermedia
+            </h2>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Total Media Terisi</p>
+                    <p id="total-media" class="text-2xl font-bold text-emerald-800">0</p>
+                    <p class="text-xs text-slate-400">Polybag bermedia</p>
+                </div>
+
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Digunakan Sapih</p>
+                    <p id="total-sapih" class="text-2xl font-bold text-blue-700">0</p>
+                    <p class="text-xs text-slate-400">Polybag terpakai</p>
+                </div>
+
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Digunakan Cabutan</p>
+                    <p id="total-cabutan" class="text-2xl font-bold text-amber-700">0</p>
+                    <p class="text-xs text-slate-400">Polybag terpakai</p>
+                </div>
+
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Total Terpakai</p>
+                    <p id="total-terpakai" class="text-2xl font-bold text-slate-800">0</p>
+                    <p class="text-xs text-slate-400">Sapih + cabutan</p>
+                </div>
+
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Sisa Polybag Bermedia</p>
+                    <p id="sisa-media" class="text-2xl font-bold text-green-700">0</p>
+                    <p class="text-xs text-slate-400">Belum digunakan</p>
+                </div>
+            </div>
+
+            <div id="peringatan-stok"
+                class="hidden mt-4 p-4 rounded-xl bg-red-100 text-red-700 font-medium">
+            </div>
+        </section>
+
+        <section class="bg-white p-6 rounded-2xl shadow">
             <h2 class="text-xl font-bold text-emerald-900 mb-4">
                 Formulir Penyapihan Bibit
             </h2>
@@ -233,94 +391,58 @@
             <form id="form-sapih" onsubmit="simpanData(event)" class="space-y-4">
 
                 <div>
-                    <label class="block text-sm font-medium">
-                        Pilih Batch Tabur
-                    </label>
-
-                    <select
-                        id="s-batch"
-                        required
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                    <label class="block text-sm font-medium">Pilih Batch Tabur</label>
+                    <select id="s-batch" required
+                        class="w-full mt-1 p-3 border rounded-xl bg-white">
                         <option value="">Memuat batch...</option>
                     </select>
+                    <p id="info-batch" class="text-sm text-emerald-700 mt-2"></p>
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium">
-                        Ukuran / Tinggi Bibit
-                    </label>
-
-                    <input
-                        type="text"
-                        id="s-ukuran"
-                        required
+                    <label class="block text-sm font-medium">Ukuran / Tinggi Bibit</label>
+                    <input type="text" id="s-ukuran" required
                         placeholder="Contoh: 20–30 cm atau 80–100 cm"
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                        class="w-full mt-1 p-3 border rounded-xl">
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium">
-                        Tanggal Penyapihan
-                    </label>
-
-                    <input
-                        type="date"
-                        id="s-tanggal"
-                        required
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                    <label class="block text-sm font-medium">Tanggal Penyapihan</label>
+                    <input type="date" id="s-tanggal" required
+                        class="w-full mt-1 p-3 border rounded-xl">
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium">
-                        Jumlah Kecambah Disapih
-                    </label>
-
-                    <input
-                        type="number"
-                        id="s-jumlah"
-                        min="1"
-                        step="1"
-                        required
+                    <label class="block text-sm font-medium">Jumlah Kecambah Disapih</label>
+                    <input type="number" id="s-jumlah" min="1" step="1" required
                         placeholder="Contoh: 4200"
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                        class="w-full mt-1 p-3 border rounded-xl">
+                    <p class="text-xs text-slate-500 mt-1">
+                        Jumlah penyapihan otomatis mengurangi sisa polybag bermedia.
+                    </p>
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium">
-                        Lokasi Bedeng Sapih
-                    </label>
-
-                    <input
-                        type="text"
-                        id="s-lokasi"
-                        required
+                    <label class="block text-sm font-medium">Lokasi Bedeng Sapih</label>
+                    <input type="text" id="s-lokasi" required
                         placeholder="Bedeng Sapih B3"
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                        class="w-full mt-1 p-3 border rounded-xl">
                 </div>
 
-                <button
-                    type="submit"
-                    class="w-full bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium cursor-pointer disabled:opacity-50"
-                >
+                <button type="submit"
+                    class="w-full bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium cursor-pointer disabled:opacity-50">
                     Simpan ke Cloud
                 </button>
-
             </form>
-        </div>
+        </section>
 
-        <div class="bg-white p-6 rounded-2xl shadow">
+        <section class="bg-white p-6 rounded-2xl shadow">
             <h3 class="text-lg font-bold text-emerald-900 mb-4">
                 Riwayat Penyapihan Bibit
             </h3>
 
             <div class="overflow-x-auto">
                 <table class="w-full text-left border-collapse text-sm">
-
                     <thead>
                         <tr class="bg-emerald-100 text-emerald-900">
                             <th class="p-3">No</th>
@@ -339,12 +461,10 @@
                             </td>
                         </tr>
                     </tbody>
-
                 </table>
             </div>
-        </div>
+        </section>
 
     </main>
-
 </body>
 </html>
