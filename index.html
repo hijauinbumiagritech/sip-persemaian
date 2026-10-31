@@ -4,10 +4,88 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SIP - Beranda & Login</title>
+    <title>SIP Persemaian | PT. Hijauin Bumi Agritech</title>
 
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        /* IDENTITAS PERUSAHAAN - EFEK 3D */
+        .company-hero {
+            position: relative;
+            overflow: hidden;
+            padding: 38px 20px;
+            border-radius: 22px;
+            text-align: center;
+            background:
+                radial-gradient(circle at 50% 0%, rgba(74, 222, 128, .25), transparent 55%),
+                linear-gradient(135deg, #052e16, #064e3b 55%, #022c22);
+            border: 1px solid rgba(167, 243, 208, .35);
+            box-shadow:
+                0 15px 35px rgba(6, 78, 59, .22),
+                inset 0 1px 1px rgba(255,255,255,.18);
+        }
+
+        .company-hero::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(
+                120deg,
+                transparent 20%,
+                rgba(255,255,255,.09),
+                transparent 65%
+            );
+            pointer-events: none;
+        }
+
+        .company-title-3d {
+            position: relative;
+            margin: 0;
+            font-size: clamp(25px, 5vw, 48px);
+            font-weight: 1000;
+            letter-spacing: .045em;
+            line-height: 1.2;
+            color: #bbf7d0;
+            background: linear-gradient(
+                180deg,
+                #ffffff 0%,
+                #bbf7d0 22%,
+                #4ade80 48%,
+                #16a34a 72%,
+                #065f46 100%
+            );
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter:
+                drop-shadow(0 2px 0 #14532d)
+                drop-shadow(0 4px 0 #064e3b)
+                drop-shadow(0 7px 0 #022c22)
+                drop-shadow(0 11px 12px rgba(0,0,0,.55));
+        }
+
+        .company-subtitle {
+            position: relative;
+            margin-top: 13px;
+            color: #d1fae5;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: .22em;
+            text-transform: uppercase;
+        }
+
+        @media (max-width: 640px) {
+            .company-hero {
+                padding: 27px 12px;
+            }
+
+            .company-subtitle {
+                font-size: 9px;
+                letter-spacing: .12em;
+            }
+        }
+    </style>
 
     <script type="module">
         import { db } from "./firebase.js";
@@ -50,10 +128,7 @@
         const normalSumber = value => {
             const s = teks(value).toLowerCase();
 
-            if (
-                s === "media tabur" ||
-                s === "tabur"
-            ) {
+            if (s === "media tabur" || s === "tabur") {
                 return "Media tabur";
             }
 
@@ -268,17 +343,10 @@
                 if (alertKeys.has(kode)) return;
 
                 alertKeys.add(kode);
-                alerts.push({
-                    level,
-                    title,
-                    detail
-                });
+                alerts.push({ level, title, detail });
             }
 
-            // --------------------------------------
             // 1. VALIDASI DATA DASAR
-            // --------------------------------------
-
             function periksaJumlah(snapshot, nama) {
                 snapshot.forEach(doc => {
                     const d = doc.data();
@@ -290,7 +358,6 @@
                             `Jumlah tidak valid: ${nama}`,
                             `Dokumen ${doc.id} memiliki jumlah kosong, bukan angka, atau bernilai negatif. Periksa kembali data.`
                         );
-
                         return;
                     }
 
@@ -312,16 +379,11 @@
             periksaJumlah(snapPolybag, "Pengisian polybag");
             periksaJumlah(snapOpname, "Opname fisik");
 
-            // --------------------------------------
             // 2. REKAP BENIH DITABUR
-            // Berdasarkan batch + jenis tanaman
-            // --------------------------------------
-
             const tabur = {};
 
             snapTabur.forEach(doc => {
                 const d = doc.data();
-
                 const batch = normalBatch(d.kode);
                 const jenis = normalJenis(d.jenis);
 
@@ -334,25 +396,19 @@
                             `Dokumen ${doc.id} belum memiliki kode batch atau jenis tanaman.`
                         );
                     }
-
                     return;
                 }
 
                 const key = kunci("Media tabur", batch, jenis);
-
                 tabur[key] = (tabur[key] || 0) + Number(d.jumlah);
             });
 
-            // --------------------------------------
             // 3. REKAP PRODUKSI BIBIT
-            // --------------------------------------
-
             const produksi = {};
 
             function tambahProduksi(snapshot, sumber, nama) {
                 snapshot.forEach(doc => {
                     const d = doc.data();
-
                     const batch = normalBatch(d.batch);
                     const jenis = normalJenis(d.jenis);
 
@@ -365,12 +421,10 @@
                                 `Dokumen ${doc.id} belum memiliki kode batch atau jenis tanaman yang lengkap.`
                             );
                         }
-
                         return;
                     }
 
                     const key = kunci(sumber, batch, jenis);
-
                     produksi[key] =
                         (produksi[key] || 0) + Number(d.jumlah);
                 });
@@ -379,10 +433,7 @@
             tambahProduksi(snapSapih, "Media tabur", "penyapihan");
             tambahProduksi(snapCabutan, "Cabutan", "cabutan");
 
-            // --------------------------------------
             // 4. CEK PENYAPIHAN MELEBIHI TABUR
-            // --------------------------------------
-
             Object.entries(produksi).forEach(([key, totalSapih]) => {
                 const [sumber, batch, jenis] = JSON.parse(key);
 
@@ -395,7 +446,6 @@
                         `Data tabur tidak ditemukan: ${batch}`,
                         `Penyapihan jenis ${jenis} tercatat, tetapi data tabur dengan batch dan jenis yang sama tidak ditemukan.`
                     );
-
                     return;
                 }
 
@@ -411,15 +461,11 @@
                 }
             });
 
-            // --------------------------------------
             // 5. REKAP DISTRIBUSI
-            // --------------------------------------
-
             const distribusi = {};
 
             snapDist.forEach(doc => {
                 const d = doc.data();
-
                 const sumber = sumberDistribusi(d);
                 const batch = normalBatch(d.batch);
                 const jenis = normalJenis(d.jenis);
@@ -431,7 +477,6 @@
                         "Sumber distribusi belum jelas",
                         `Dokumen ${doc.id} tidak memiliki sumber bibit yang dikenali. Sistem tidak menebak sumber bibit agar stok tidak salah dihitung.`
                     );
-
                     return;
                 }
 
@@ -442,14 +487,12 @@
                         "Identitas distribusi belum lengkap",
                         `Dokumen ${doc.id} belum memiliki kode batch atau jenis tanaman.`
                     );
-
                     return;
                 }
 
                 if (!jumlahValid(d.jumlah)) return;
 
                 const key = kunci(sumber, batch, jenis);
-
                 distribusi[key] =
                     (distribusi[key] || 0) + Number(d.jumlah);
 
@@ -463,13 +506,9 @@
                 }
             });
 
-            // --------------------------------------
             // 6. DISTRIBUSI MELEBIHI PRODUKSI
-            // --------------------------------------
-
             Object.entries(distribusi).forEach(([key, totalKeluar]) => {
                 const totalProduksi = produksi[key];
-
                 const [sumber, batch, jenis] = JSON.parse(key);
 
                 if (totalProduksi === undefined) {
@@ -479,7 +518,6 @@
                         `Data produksi tidak ditemukan: ${batch}`,
                         `Distribusi jenis ${jenis} dari sumber ${sumber} tercatat ${formatAngka(totalKeluar)} bibit, tetapi data produksi dengan identitas yang sama tidak ditemukan.`
                     );
-
                     return;
                 }
 
@@ -493,25 +531,18 @@
                 }
             });
 
-            // --------------------------------------
             // 7. PEMAKAIAN POLYBAG
-            // --------------------------------------
-
             const jumlahSnapshot = snapshot =>
                 snapshot.docs.reduce((total, doc) => {
                     const d = doc.data();
-
                     return total + (
-                        jumlahValid(d.jumlah)
-                            ? Number(d.jumlah)
-                            : 0
+                        jumlahValid(d.jumlah) ? Number(d.jumlah) : 0
                     );
                 }, 0);
 
             const totalPolybag = jumlahSnapshot(snapPolybag);
             const totalSapih = jumlahSnapshot(snapSapih);
             const totalCabutan = jumlahSnapshot(snapCabutan);
-
             const totalPemakaian = totalSapih + totalCabutan;
 
             if (totalPemakaian > totalPolybag) {
@@ -523,16 +554,11 @@
                 );
             }
 
-            // --------------------------------------
             // 8. OPNAME TERBARU
-            // Berdasarkan sumber + batch + jenis
-            // --------------------------------------
-
             const opnameTerbaru = {};
 
             snapOpname.forEach(doc => {
                 const d = doc.data();
-
                 const sumber = sumberOpname(d);
                 const batch = normalBatch(d.batch);
                 const jenis = normalJenis(d.jenis);
@@ -544,7 +570,6 @@
                         "Identitas data opname belum lengkap",
                         `Dokumen opname ${doc.id} belum memiliki sumber, batch, atau jenis tanaman yang lengkap. Data ini tidak dibandingkan dengan stok sistem.`
                     );
-
                     return;
                 }
 
@@ -559,7 +584,6 @@
                         "Tanggal opname tidak valid",
                         `Dokumen opname ${doc.id} tidak memiliki tanggal yang dapat dibaca.`
                     );
-
                     return;
                 }
 
@@ -576,13 +600,9 @@
                 }
             });
 
-            // --------------------------------------
             // 9. BANDINGKAN OPNAME DENGAN STOK SISTEM
-            // --------------------------------------
-
             Object.entries(opnameTerbaru).forEach(([key, opname]) => {
                 const [sumber, batch, jenis] = JSON.parse(key);
-
                 const totalProduksi = produksi[key];
 
                 if (totalProduksi === undefined) {
@@ -594,7 +614,6 @@
                             `Opname jenis ${jenis}, sumber ${sumber} tercatat ${formatAngka(opname.jumlah)} bibit, tetapi data produksi tidak ditemukan.`
                         );
                     }
-
                     return;
                 }
 
@@ -613,28 +632,15 @@
                 }
             });
 
-            // --------------------------------------
             // 10. URUTKAN PERINGATAN
-            // --------------------------------------
-
             alerts.sort((a, b) => {
-                const urutan = {
-                    danger: 0,
-                    warning: 1
-                };
-
+                const urutan = { danger: 0, warning: 1 };
                 return urutan[a.level] - urutan[b.level];
             });
 
-            // --------------------------------------
             // 11. TAMPILKAN HASIL
-            // --------------------------------------
-
-            const container =
-                document.getElementById("daftar-anomali");
-
-            const count =
-                document.getElementById("jumlah-anomali");
+            const container = document.getElementById("daftar-anomali");
+            const count = document.getElementById("jumlah-anomali");
 
             if (!container || !count) return;
 
@@ -643,32 +649,25 @@
 
             if (alerts.length === 0) {
                 const box = document.createElement("div");
-
                 box.className =
-                    "rounded-xl border border-emerald-200 " +
-                    "bg-emerald-50 p-4 text-emerald-800";
+                    "rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-800";
 
                 const title = document.createElement("strong");
-
                 title.textContent =
                     "Belum ditemukan ketidakseimbangan dari pemeriksaan.";
 
                 const detail = document.createElement("p");
-
                 detail.className = "text-sm mt-1";
-
                 detail.textContent =
                     "Pemeriksaan berdasarkan data yang tersedia dan dapat dikenali. Tetap lakukan pemeriksaan dokumen serta opname fisik secara berkala.";
 
                 box.append(title, detail);
                 container.appendChild(box);
-
                 return;
             }
 
             alerts.forEach(a => {
                 const box = document.createElement("div");
-
                 box.className =
                     "rounded-xl border p-4 " +
                     (a.level === "danger"
@@ -676,11 +675,9 @@
                         : "border-amber-200 bg-amber-50");
 
                 const row = document.createElement("div");
-
                 row.className = "flex gap-2 items-start";
 
                 const icon = document.createElement("span");
-
                 icon.className = "text-lg";
                 icon.textContent =
                     a.level === "danger" ? "🔴" : "🟠";
@@ -688,19 +685,14 @@
                 const content = document.createElement("div");
 
                 const title = document.createElement("strong");
-
                 title.className =
                     a.level === "danger"
                         ? "text-rose-800"
                         : "text-amber-800";
-
                 title.textContent = a.title;
 
                 const detail = document.createElement("p");
-
-                detail.className =
-                    "text-sm text-slate-700 mt-1";
-
+                detail.className = "text-sm text-slate-700 mt-1";
                 detail.textContent = a.detail;
 
                 content.append(title, detail);
@@ -739,10 +731,7 @@
                     getDocs(collection(db, "distribusi_das"))
                 ]);
 
-                // ----------------------------------
                 // STOK BAHAN MEDIA
-                // ----------------------------------
-
                 let totalTanah = 0;
                 let totalPupuk = 0;
 
@@ -761,10 +750,7 @@
                     }
                 });
 
-                // ----------------------------------
                 // PENGISIAN DAN PEMAKAIAN POLYBAG
-                // ----------------------------------
-
                 const totalPolybag = snapPolybag.docs.reduce(
                     (a, x) => a + jumlah(x.data()),
                     0
@@ -780,16 +766,10 @@
                     0
                 );
 
-                const totalPemakaian =
-                    totalSapih + totalCabutan;
+                const totalPemakaian = totalSapih + totalCabutan;
+                const sisaMedia = totalPolybag - totalPemakaian;
 
-                const sisaMedia =
-                    totalPolybag - totalPemakaian;
-
-                // ----------------------------------
                 // BENIH DAN DISTRIBUSI
-                // ----------------------------------
-
                 const totalBenih = snapTabur.docs.reduce(
                     (a, x) => a + jumlah(x.data()),
                     0
@@ -803,16 +783,11 @@
                 const totalStok =
                     totalSapih + totalCabutan - totalDist;
 
-                // ----------------------------------
                 // OPNAME TERBARU
-                // Per sumber + batch + jenis
-                // ----------------------------------
-
                 const opnameTerbaru = {};
 
                 snapOpname.forEach(doc => {
                     const d = doc.data();
-
                     const batch = normalBatch(d.batch);
                     const sumber = sumberOpname(d);
                     const jenis = normalJenis(d.jenis);
@@ -840,10 +815,7 @@
                         0
                     );
 
-                // ----------------------------------
                 // TAMPILKAN KARTU DASHBOARD
-                // ----------------------------------
-
                 document.getElementById("stat-tanah").textContent =
                     `${totalTanah.toFixed(1)} m³`;
 
@@ -906,18 +878,12 @@
                 document.getElementById("stat-distribusi").textContent =
                     `${formatAngka(totalDist)} Bibit`;
 
-                // ----------------------------------
                 // STATUS PEMBARUAN
-                // ----------------------------------
-
                 status.textContent =
                     "Data berhasil diperbarui: " +
                     new Date().toLocaleString("id-ID");
 
-                // ----------------------------------
                 // GRAFIK
-                // ----------------------------------
-
                 gambarGrafik(
                     snapTabur,
                     snapSapih,
@@ -925,10 +891,7 @@
                     snapDist
                 );
 
-                // ----------------------------------
                 // ANOMALI
-                // ----------------------------------
-
                 tampilkanAnomali({
                     snapTabur,
                     snapSapih,
@@ -939,10 +902,7 @@
                 });
 
             } catch (e) {
-                console.error(
-                    "Gagal memuat data cloud:",
-                    e
-                );
+                console.error("Gagal memuat data cloud:", e);
 
                 status.textContent =
                     "Gagal memperbarui data dashboard.";
@@ -964,109 +924,74 @@
 <body class="bg-emerald-50 text-slate-800 font-sans min-h-screen">
 
     <!-- AUTH LOADING -->
-    <div
-        id="auth-loading"
-        class="flex items-center justify-center min-h-screen px-4"
-    >
+    <div id="auth-loading"
+         class="flex items-center justify-center min-h-screen px-4">
         <div class="text-center bg-white p-8 rounded-2xl shadow-lg">
             <div class="text-4xl mb-3">🌱</div>
-
             <h2 class="text-lg font-bold text-emerald-900">
                 SIP Persemaian
             </h2>
-
             <p class="text-sm text-slate-500 mt-2">
                 Memeriksa sesi pengguna...
             </p>
-
             <div class="mt-4 w-8 h-8 border-4 border-emerald-200 border-t-emerald-700 rounded-full animate-spin mx-auto"></div>
         </div>
     </div>
 
     <!-- LOGIN SECTION -->
-    <div
-        id="login-section"
-        class="hidden flex items-center justify-center min-h-screen px-4"
-    >
+    <div id="login-section"
+         class="hidden flex items-center justify-center min-h-screen px-4">
         <div class="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md space-y-6">
-
             <div class="text-center">
                 <h1 class="text-2xl font-bold text-emerald-900">
                     🌱 SIP Login
                 </h1>
-
                 <p class="text-xs text-slate-500 mt-1">
                     Sistem Informasi Persemaian PT. Hijauin Bumi Agritech
                 </p>
             </div>
 
             <form onsubmit="prosesLogin(event)" class="space-y-4">
-
                 <div>
-                    <label
-                        class="block text-sm font-medium"
-                        for="input-email"
-                    >
+                    <label class="block text-sm font-medium" for="input-email">
                         Email Admin / Petugas
                     </label>
+                    <input type="email" id="input-email" required
+                           autocomplete="username"
+                           placeholder="nama@email.com"
+                           class="w-full mt-1 p-3 border rounded-xl outline-none focus:ring-2 focus:ring-emerald-600">
 
-                    <input
-                        type="email"
-                        id="input-email"
-                        required
-                        autocomplete="username"
-                        placeholder="nama@email.com"
-                        class="w-full mt-1 p-3 border rounded-xl outline-none focus:ring-2 focus:ring-emerald-600"
-                    >
-
-                    <label
-                        class="block text-sm font-medium mt-3"
-                        for="input-sandi"
-                    >
+                    <label class="block text-sm font-medium mt-3" for="input-sandi">
                         Password
                     </label>
-
-                    <input
-                        type="password"
-                        id="input-sandi"
-                        required
-                        autocomplete="current-password"
-                        placeholder="Masukkan password..."
-                        class="w-full mt-1 p-3 border rounded-xl outline-none focus:ring-2 focus:ring-emerald-600"
-                    >
+                    <input type="password" id="input-sandi" required
+                           autocomplete="current-password"
+                           placeholder="Masukkan password..."
+                           class="w-full mt-1 p-3 border rounded-xl outline-none focus:ring-2 focus:ring-emerald-600">
                 </div>
 
-                <button
-                    type="submit"
-                    class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-medium p-3 rounded-xl cursor-pointer"
-                >
+                <button type="submit"
+                        class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-medium p-3 rounded-xl cursor-pointer">
                     Masuk Beranda
                 </button>
-
             </form>
         </div>
     </div>
 
     <!-- DASHBOARD SECTION -->
-    <div
-        id="dashboard-section"
-        class="hidden min-h-screen flex flex-col"
-    >
+    <div id="dashboard-section"
+         class="hidden min-h-screen flex flex-col">
 
         <header class="bg-emerald-800 text-white shadow-md">
             <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-
                 <h1 class="text-xl font-bold">
                     🌱 SIP - Beranda Utama (Cloud Live)
                 </h1>
 
-                <button
-                    onclick="logout()"
-                    class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg hover:bg-emerald-950 cursor-pointer"
-                >
+                <button onclick="logout()"
+                        class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg hover:bg-emerald-950 cursor-pointer">
                     Keluar
                 </button>
-
             </div>
         </header>
 
@@ -1074,73 +999,53 @@
         <nav class="bg-emerald-700 text-white shadow-inner">
             <div class="max-w-7xl mx-auto px-4 flex overflow-x-auto space-x-2 py-3 text-sm">
 
-                <a
-                    href="index.html"
-                    class="px-4 py-2 bg-emerald-900 rounded font-medium whitespace-nowrap"
-                >
+                <a href="index.html"
+                   class="px-4 py-2 bg-emerald-900 rounded font-medium whitespace-nowrap">
                     📊 Beranda
                 </a>
 
-                <a
-                    href="bahan-media.html"
-                    class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap"
-                >
+                <a href="bahan-media.html"
+                   class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">
                     1️⃣ Stok Bahan Media
                 </a>
 
-                <a
-                    href="isi-polybag.html"
-                    class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap"
-                >
+                <a href="isi-polybag.html"
+                   class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">
                     2️⃣ Pengisian Polybag
                 </a>
 
-                <a
-                    href="tabur.html"
-                    class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap"
-                >
+                <a href="tabur.html"
+                   class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">
                     3️⃣ Tabur Benih
                 </a>
 
-                <a
-                    href="sapih.html"
-                    class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap"
-                >
+                <a href="sapih.html"
+                   class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">
                     4️⃣ Penyapihan
                 </a>
 
-                <a
-                    href="cabutan.html"
-                    class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap"
-                >
+                <a href="cabutan.html"
+                   class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">
                     5️⃣ Sumber Benih Cabutan
                 </a>
 
-                <a
-                    href="perawatan.html"
-                    class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap"
-                >
+                <a href="perawatan.html"
+                   class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">
                     6️⃣ Perawatan
                 </a>
 
-                <a
-                    href="opname.html"
-                    class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap"
-                >
+                <a href="opname.html"
+                   class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">
                     7️⃣ Opname Bedeng
                 </a>
 
-                <a
-                    href="stok-bibit.html"
-                    class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap"
-                >
+                <a href="stok-bibit.html"
+                   class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">
                     8️⃣ Stok Bibit & Harga
                 </a>
 
-                <a
-                    href="distribusi.html"
-                    class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap"
-                >
+                <a href="distribusi.html"
+                   class="px-4 py-2 hover:bg-emerald-600 rounded font-medium whitespace-nowrap">
                     9️⃣ Distribusi / DAS
                 </a>
 
@@ -1149,25 +1054,28 @@
 
         <main class="max-w-7xl mx-auto px-4 py-6 flex-1 space-y-6 w-full">
 
-            <div class="flex flex-wrap justify-between items-center gap-2">
+            <!-- IDENTITAS PERUSAHAAN 3D -->
+            <section class="company-hero">
+                <h1 class="company-title-3d">
+                    PT. HIJAUIN BUMI AGRITECH
+                </h1>
+                <p class="company-subtitle">
+                    Sistem Informasi Persemaian
+                </p>
+            </section>
 
+            <div class="flex flex-wrap justify-between items-center gap-2">
                 <h2 class="text-2xl font-bold text-emerald-900">
                     Ringkasan Lengkap Operasional Persemaian
                 </h2>
 
-                <button
-                    onclick="muatDataCloud()"
-                    class="bg-emerald-700 hover:bg-emerald-800 text-white text-sm px-4 py-2 rounded-lg"
-                >
+                <button onclick="muatDataCloud()"
+                        class="bg-emerald-700 hover:bg-emerald-800 text-white text-sm px-4 py-2 rounded-lg">
                     ↻ Perbarui Data
                 </button>
-
             </div>
 
-            <p
-                id="status-dashboard"
-                class="text-xs text-slate-500"
-            >
+            <p id="status-dashboard" class="text-xs text-slate-500">
                 Menghubungkan ke database...
             </p>
 
@@ -1250,14 +1158,11 @@
             <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
                 <div class="lg:col-span-2 bg-white p-5 rounded-2xl shadow">
-
                     <div class="flex flex-wrap justify-between items-center gap-2 mb-4">
-
                         <div>
                             <h3 class="text-lg font-bold text-emerald-900">
                                 Grafik Perkembangan Persemaian
                             </h3>
-
                             <p class="text-xs text-slate-500">
                                 Pergerakan data 12 bulan terakhir berdasarkan tanggal pencatatan.
                             </p>
@@ -1266,36 +1171,28 @@
                         <span class="text-xs bg-emerald-50 text-emerald-800 px-3 py-1 rounded-full">
                             Data Firestore
                         </span>
-
                     </div>
 
                     <div class="relative h-80">
                         <canvas id="grafik-perkembangan"></canvas>
                     </div>
-
                 </div>
 
                 <div class="bg-white p-5 rounded-2xl shadow">
-
                     <div class="flex justify-between items-center gap-2 mb-4">
-
                         <div>
                             <h3 class="text-lg font-bold text-emerald-900">
                                 Peringatan Anomali
                             </h3>
-
                             <p class="text-xs text-slate-500">
                                 Pemeriksaan ketidakseimbangan data.
                             </p>
                         </div>
 
-                        <span
-                            id="jumlah-anomali"
-                            class="min-w-8 text-center bg-rose-100 text-rose-800 font-bold px-2 py-1 rounded-full"
-                        >
+                        <span id="jumlah-anomali"
+                              class="min-w-8 text-center bg-rose-100 text-rose-800 font-bold px-2 py-1 rounded-full">
                             0
                         </span>
-
                     </div>
 
                     <div id="daftar-anomali" class="space-y-3">
@@ -1303,7 +1200,6 @@
                             Memeriksa data persemaian...
                         </div>
                     </div>
-
                 </div>
 
             </section>
@@ -1357,7 +1253,6 @@
             } else {
                 dashboardSection.classList.add("hidden");
                 loginSection.classList.remove("hidden");
-
                 dashboardSudahDimuat = false;
             }
         }
@@ -1410,7 +1305,6 @@
 
             } catch (error) {
                 console.error("Logout gagal:", error);
-
                 alert("Gagal keluar: " + error.message);
             }
         };
