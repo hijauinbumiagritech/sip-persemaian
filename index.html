@@ -10,20 +10,20 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
-        /* IDENTITAS PERUSAHAAN - EFEK 3D */
+        /* IDENTITAS PERUSAHAAN - 3D COMPACT */
         .company-hero {
             position: relative;
             overflow: hidden;
-            padding: 38px 20px;
-            border-radius: 22px;
+            padding: 22px 16px;
+            border-radius: 18px;
             text-align: center;
             background:
-                radial-gradient(circle at 50% 0%, rgba(74, 222, 128, .25), transparent 55%),
+                radial-gradient(circle at 50% 0%, rgba(74, 222, 128, .20), transparent 55%),
                 linear-gradient(135deg, #052e16, #064e3b 55%, #022c22);
-            border: 1px solid rgba(167, 243, 208, .35);
+            border: 1px solid rgba(167, 243, 208, .30);
             box-shadow:
-                0 15px 35px rgba(6, 78, 59, .22),
-                inset 0 1px 1px rgba(255,255,255,.18);
+                0 10px 25px rgba(6, 78, 59, .18),
+                inset 0 1px 1px rgba(255,255,255,.15);
         }
 
         .company-hero::before {
@@ -33,7 +33,7 @@
             background: linear-gradient(
                 120deg,
                 transparent 20%,
-                rgba(255,255,255,.09),
+                rgba(255,255,255,.07),
                 transparent 65%
             );
             pointer-events: none;
@@ -42,11 +42,11 @@
         .company-title-3d {
             position: relative;
             margin: 0;
-            font-size: clamp(25px, 5vw, 48px);
-            font-weight: 1000;
-            letter-spacing: .045em;
+            font-size: clamp(20px, 3.5vw, 34px);
+            font-weight: 900;
+            letter-spacing: .035em;
             line-height: 1.2;
-            color: #bbf7d0;
+
             background: linear-gradient(
                 180deg,
                 #ffffff 0%,
@@ -55,34 +55,40 @@
                 #16a34a 72%,
                 #065f46 100%
             );
+
             -webkit-background-clip: text;
             background-clip: text;
             -webkit-text-fill-color: transparent;
+
             filter:
-                drop-shadow(0 2px 0 #14532d)
-                drop-shadow(0 4px 0 #064e3b)
-                drop-shadow(0 7px 0 #022c22)
-                drop-shadow(0 11px 12px rgba(0,0,0,.55));
+                drop-shadow(0 1px 0 #14532d)
+                drop-shadow(0 3px 0 #064e3b)
+                drop-shadow(0 5px 0 #022c22)
+                drop-shadow(0 7px 8px rgba(0,0,0,.45));
         }
 
         .company-subtitle {
             position: relative;
-            margin-top: 13px;
+            margin-top: 8px;
             color: #d1fae5;
-            font-size: 12px;
+            font-size: 10px;
             font-weight: 600;
-            letter-spacing: .22em;
+            letter-spacing: .16em;
             text-transform: uppercase;
         }
 
         @media (max-width: 640px) {
             .company-hero {
-                padding: 27px 12px;
+                padding: 18px 10px;
+            }
+
+            .company-title-3d {
+                font-size: clamp(19px, 5vw, 26px);
             }
 
             .company-subtitle {
-                font-size: 9px;
-                letter-spacing: .12em;
+                font-size: 8px;
+                letter-spacing: .10em;
             }
         }
     </style>
