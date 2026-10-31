@@ -16,7 +16,8 @@
             query,
             orderBy,
             doc,
-            updateDoc
+            updateDoc,
+            deleteDoc
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         if (!(await requireAuth())) {
@@ -24,8 +25,8 @@
         }
 
         const koleksi = collection(db, "perawatan");
-        const tabelData = document.getElementById("tabel-data");
-        const formPerawatan = document.getElementById("form-perawatan");
+        const form = document.getElementById("form-perawatan");
+        const tabel = document.getElementById("tabel-data");
 
         let dataPerawatan = [];
         let idEdit = null;
@@ -45,10 +46,18 @@
             }[c]));
         }
 
+        function formatJumlah(jumlah, satuan) {
+            if (jumlah === null || jumlah === undefined || jumlah === "") {
+                return "-";
+            }
+
+            return `${Number(jumlah).toLocaleString("id-ID")} ${aman(satuan || "")}`;
+        }
+
         function tampilkanRingkasan() {
-            const jumlahPenyiraman = dataPerawatan.filter(d => d.jenis === "Penyiraman Rutin").length;
-            const jumlahPemupukan = dataPerawatan.filter(d => d.jenis === "Pemupukan NPK/Organik").length;
-            const jumlahPenyemprotan = dataPerawatan.filter(d => d.jenis === "Penyemprotan Pestisida").length;
+            const penyiraman = dataPerawatan.filter(d => d.jenis === "Penyiraman Rutin").length;
+            const pemupukan = dataPerawatan.filter(d => d.jenis === "Pemupukan NPK/Organik").length;
+            const penyemprotan = dataPerawatan.filter(d => d.jenis === "Penyemprotan Pestisida").length;
 
             document.getElementById("ringkasan").innerHTML = `
                 <div class="bg-white p-4 rounded-xl shadow">
@@ -57,24 +66,24 @@
                 </div>
                 <div class="bg-white p-4 rounded-xl shadow">
                     <p class="text-sm text-slate-500">Penyiraman</p>
-                    <p class="text-2xl font-bold text-blue-700">${jumlahPenyiraman}</p>
+                    <p class="text-2xl font-bold text-blue-700">${penyiraman}</p>
                 </div>
                 <div class="bg-white p-4 rounded-xl shadow">
                     <p class="text-sm text-slate-500">Pemupukan</p>
-                    <p class="text-2xl font-bold text-orange-700">${jumlahPemupukan}</p>
+                    <p class="text-2xl font-bold text-orange-700">${pemupukan}</p>
                 </div>
                 <div class="bg-white p-4 rounded-xl shadow">
                     <p class="text-sm text-slate-500">Penyemprotan</p>
-                    <p class="text-2xl font-bold text-purple-700">${jumlahPenyemprotan}</p>
+                    <p class="text-2xl font-bold text-purple-700">${penyemprotan}</p>
                 </div>
             `;
         }
 
         function tampilkanTabel() {
-            tabelData.innerHTML = "";
+            tabel.innerHTML = "";
 
             if (!dataPerawatan.length) {
-                tabelData.innerHTML = `
+                tabel.innerHTML = `
                     <tr>
                         <td colspan="7" class="p-4 text-center text-slate-400">
                             Belum ada riwayat perawatan.
@@ -89,81 +98,76 @@
                 const tr = document.createElement("tr");
                 tr.className = "border-b hover:bg-emerald-50";
 
-                const jumlah = d.jumlah !== undefined && d.jumlah !== null && d.jumlah !== ""
-                    ? `${Number(d.jumlah).toLocaleString("id-ID")} ${aman(d.satuan || "")}`
-                    : "-";
-
                 tr.innerHTML = `
                     <td class="p-3">${index + 1}</td>
                     <td class="p-3">${aman(d.tanggal || "-")}</td>
                     <td class="p-3 font-medium">${aman(d.jenis || "-")}</td>
                     <td class="p-3">${aman(d.lokasi || "-")}</td>
-                    <td class="p-3">${jumlah}</td>
+                    <td class="p-3">${formatJumlah(d.jumlah, d.satuan)}</td>
                     <td class="p-3 text-slate-600">${aman(d.catatan || "-")}</td>
                     <td class="p-3 whitespace-nowrap">
-                        <button type="button" data-edit="${aman(d.id)}"
-                            class="text-blue-700 font-semibold hover:underline">
+                        <button type="button"
+                            data-edit="${aman(d.id)}"
+                            class="bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-semibold mr-1">
                             Edit
+                        </button>
+                        <button type="button"
+                            data-hapus="${aman(d.id)}"
+                            class="bg-red-100 text-red-700 px-3 py-1.5 rounded-lg text-xs font-semibold">
+                            Hapus
                         </button>
                     </td>
                 `;
 
-                tabelData.appendChild(tr);
+                tabel.appendChild(tr);
             });
 
-            tabelData.querySelectorAll("[data-edit]").forEach(button => {
+            tabel.querySelectorAll("[data-edit]").forEach(button => {
                 button.addEventListener("click", () => mulaiEdit(button.dataset.edit));
+            });
+
+            tabel.querySelectorAll("[data-hapus]").forEach(button => {
+                button.addEventListener("click", () => hapusData(button.dataset.hapus));
             });
 
             tampilkanRingkasan();
         }
 
-        async function muatTabel() {
-            try {
-                const q = query(koleksi, orderBy("tanggal", "desc"));
-                const snapshot = await getDocs(q);
+        async function muatData() {
+            const q = query(koleksi, orderBy("tanggal", "desc"));
+            const snapshot = await getDocs(q);
 
-                dataPerawatan = snapshot.docs.map(item => ({
-                    id: item.id,
-                    ...item.data()
-                }));
+            dataPerawatan = snapshot.docs.map(item => ({
+                id: item.id,
+                ...item.data()
+            }));
 
-                tampilkanTabel();
-            } catch (error) {
-                console.error("Gagal memuat tabel perawatan:", error);
-                tabelData.innerHTML = `
-                    <tr>
-                        <td colspan="7" class="p-4 text-center text-red-600">
-                            Gagal memuat data: ${aman(error.message)}
-                        </td>
-                    </tr>
-                `;
-            }
+            tampilkanTabel();
         }
 
         function mulaiEdit(id) {
-            const data = dataPerawatan.find(item => item.id === id);
-            if (!data) return;
+            const d = dataPerawatan.find(item => item.id === id);
+            if (!d) return;
 
             idEdit = id;
 
-            document.getElementById("p-tanggal").value = data.tanggal || "";
-            document.getElementById("p-jenis").value = data.jenis || "Penyiraman Rutin";
-            document.getElementById("p-lokasi").value = data.lokasi || "";
-            document.getElementById("p-jumlah").value = data.jumlah ?? "";
-            document.getElementById("p-satuan").value = data.satuan || "";
-            document.getElementById("p-catatan").value = data.catatan || "";
+            document.getElementById("p-tanggal").value = d.tanggal || "";
+            document.getElementById("p-jenis").value = d.jenis || "Penyiraman Rutin";
+            document.getElementById("p-lokasi").value = d.lokasi || "";
+            document.getElementById("p-jumlah").value = d.jumlah ?? "";
+            document.getElementById("p-satuan").value = d.satuan || "";
+            document.getElementById("p-catatan").value = d.catatan || "";
 
             document.getElementById("judul-form").textContent = "Edit Data Perawatan";
             document.getElementById("tombol-simpan").textContent = "Simpan Perubahan";
             document.getElementById("tombol-batal").classList.remove("hidden");
 
-            formPerawatan.scrollIntoView({ behavior: "smooth" });
+            form.scrollIntoView({ behavior: "smooth" });
         }
 
         function batalEdit() {
             idEdit = null;
-            formPerawatan.reset();
+            form.reset();
 
             document.getElementById("p-tanggal").value = hariIni();
             document.getElementById("judul-form").textContent = "Catat Jadwal Penyiraman & Pemupukan";
@@ -171,13 +175,39 @@
             document.getElementById("tombol-batal").classList.add("hidden");
         }
 
+        async function hapusData(id) {
+            const data = dataPerawatan.find(item => item.id === id);
+            if (!data) return;
+
+            const yakin = confirm(
+                `Apakah Anda yakin ingin menghapus catatan perawatan berikut?\n\n` +
+                `Tanggal: ${data.tanggal || "-"}\n` +
+                `Kegiatan: ${data.jenis || "-"}\n` +
+                `Lokasi: ${data.lokasi || "-"}\n\n` +
+                `Catatan ini akan dihapus dari riwayat.`
+            );
+
+            if (!yakin) return;
+
+            try {
+                await deleteDoc(doc(db, "perawatan", id));
+
+                if (idEdit === id) {
+                    batalEdit();
+                }
+
+                alert("Catatan perawatan berhasil dihapus.");
+                await muatData();
+
+            } catch (error) {
+                console.error("Gagal menghapus data:", error);
+                alert("Gagal menghapus data: " + error.message);
+            }
+        }
+
         document.getElementById("tombol-batal").addEventListener("click", batalEdit);
 
-        document.getElementById("jenis-lainnya").addEventListener("change", function() {
-            document.getElementById("p-jenis").value = this.value;
-        });
-
-        formPerawatan.addEventListener("submit", async function(e) {
+        form.addEventListener("submit", async function(e) {
             e.preventDefault();
 
             const tanggal = document.getElementById("p-tanggal").value;
@@ -200,7 +230,7 @@
             }
 
             if (jumlah !== null && !satuan) {
-                alert("Pilih satuan untuk jumlah pemakaian.");
+                alert("Pilih satuan jumlah pemakaian.");
                 return;
             }
 
@@ -208,30 +238,30 @@
             tombol.disabled = true;
             tombol.textContent = "Menyimpan...";
 
-            const payload = {
-                tanggal,
-                jenis,
-                lokasi,
-                catatan,
-                jumlah,
-                satuan,
-                timestamp: new Date()
-            };
-
             try {
+                const payload = {
+                    tanggal,
+                    jenis,
+                    lokasi,
+                    catatan,
+                    jumlah,
+                    satuan,
+                    timestamp: new Date()
+                };
+
                 if (idEdit) {
                     await updateDoc(doc(db, "perawatan", idEdit), payload);
                     alert("Data perawatan berhasil diperbarui.");
                 } else {
                     await addDoc(koleksi, payload);
-                    alert("Log perawatan berhasil disimpan.");
+                    alert("Data perawatan berhasil disimpan.");
                 }
 
                 batalEdit();
-                await muatTabel();
+                await muatData();
 
             } catch (error) {
-                console.error("Gagal menyimpan perawatan:", error);
+                console.error("Gagal menyimpan data:", error);
                 alert("Gagal menyimpan data: " + error.message);
             } finally {
                 tombol.disabled = false;
@@ -240,7 +270,19 @@
         });
 
         document.getElementById("p-tanggal").value = hariIni();
-        await muatTabel();
+
+        try {
+            await muatData();
+        } catch (error) {
+            console.error(error);
+            tabel.innerHTML = `
+                <tr>
+                    <td colspan="7" class="p-4 text-center text-red-600">
+                        Gagal memuat data: ${aman(error.message)}
+                    </td>
+                </tr>
+            `;
+        }
     </script>
 </head>
 
