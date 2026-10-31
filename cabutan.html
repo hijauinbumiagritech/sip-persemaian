@@ -18,95 +18,258 @@
             orderBy
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // Memastikan pengguna sudah login
         if (!(await requireAuth())) {
             throw new Error("Login diperlukan.");
         }
 
-        // Fungsi memuat riwayat data cabutan
-        async function muatData() {
-            const tbody = document.getElementById("tabel-data");
+        const formCabutan = document.getElementById("form-cabutan");
+        const tabelData = document.getElementById("tabel-data");
+        const tombolSimpan = document.getElementById("tombol-simpan");
 
+        let dataCabutan = [];
+        let totalMedia = 0;
+        let totalSapih = 0;
+        let totalCabutan = 0;
+
+        const angka = (nilai) =>
+            (Number(nilai) || 0).toLocaleString("id-ID");
+
+        // ==========================================
+        // RINGKASAN STOK POLYBAG BERMEDIA
+        // ==========================================
+
+        function tampilkanRingkasan() {
+            const totalTerpakai = totalSapih + totalCabutan;
+            const sisaMedia = totalMedia - totalTerpakai;
+
+            document.getElementById("total-media").textContent =
+                angka(totalMedia);
+
+            document.getElementById("total-sapih").textContent =
+                angka(totalSapih);
+
+            document.getElementById("total-cabutan").textContent =
+                angka(totalCabutan);
+
+            document.getElementById("total-terpakai").textContent =
+                angka(totalTerpakai);
+
+            document.getElementById("sisa-media").textContent =
+                angka(sisaMedia);
+
+            const peringatan = document.getElementById("peringatan-stok");
+
+            if (sisaMedia < 0) {
+                peringatan.classList.remove("hidden");
+                peringatan.textContent =
+                    `PERINGATAN: Penggunaan polybag telah melebihi stok media sebanyak ${angka(Math.abs(sisaMedia))} polybag. Transaksi cabutan baru tidak dapat dilakukan.`;
+            } else {
+                peringatan.classList.add("hidden");
+                peringatan.textContent = "";
+            }
+        }
+
+        // ==========================================
+        // MEMUAT DATA DAN MENGHITUNG STOK
+        // ==========================================
+
+        async function muatData() {
             try {
-                const q = query(
-                    collection(db, "cabutan_bibit"),
-                    orderBy("tanggal", "desc")
+                tabelData.innerHTML = `
+                    <tr>
+                        <td colspan="8" class="p-4 text-center text-slate-400">
+                            Memuat data...
+                        </td>
+                    </tr>
+                `;
+
+                const [
+                    snapMedia,
+                    snapSapih,
+                    snapCabutan
+                ] = await Promise.all([
+                    getDocs(collection(db, "isi_polybag")),
+                    getDocs(collection(db, "penyapihan")),
+                    getDocs(query(
+                        collection(db, "cabutan_bibit"),
+                        orderBy("tanggal", "desc")
+                    ))
+                ]);
+
+                totalMedia = snapMedia.docs.reduce(
+                    (total, doc) =>
+                        total + (Number(doc.data().jumlah) || 0),
+                    0
                 );
 
-                const snap = await getDocs(q);
+                totalSapih = snapSapih.docs.reduce(
+                    (total, doc) =>
+                        total + (Number(doc.data().jumlah) || 0),
+                    0
+                );
 
-                tbody.innerHTML = "";
+                dataCabutan = snapCabutan.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
 
-                if (snap.empty) {
-                    tbody.innerHTML = `
-                        <tr>
-                            <td colspan="8" class="p-4 text-center text-slate-400">
-                                Belum ada data cabutan.
-                            </td>
-                        </tr>
-                    `;
-                    return;
-                }
+                totalCabutan = dataCabutan.reduce(
+                    (total, d) =>
+                        total + (Number(d.jumlah) || 0),
+                    0
+                );
 
-                let no = 1;
-
-                snap.forEach((doc) => {
-                    const d = doc.data();
-
-                    tbody.innerHTML += `
-                        <tr class="border-b">
-                            <td class="p-3">${no++}</td>
-                            <td class="p-3">${d.batch || "-"}</td>
-                            <td class="p-3">${d.jenis || "-"}</td>
-                            <td class="p-3">${d.ukuran || "Belum dicatat"}</td>
-                            <td class="p-3">${d.tanggal || "-"}</td>
-                            <td class="p-3">${d.asal || "-"}</td>
-                            <td class="p-3 font-semibold text-emerald-700">
-                                ${d.jumlah ?? 0} Bibit
-                            </td>
-                            <td class="p-3">${d.lokasi || "-"}</td>
-                        </tr>
-                    `;
-                });
+                tampilkanRingkasan();
+                tampilkanTabel();
 
             } catch (error) {
                 console.error("Gagal memuat data cabutan:", error);
 
-                tbody.innerHTML = `
+                tabelData.innerHTML = `
                     <tr>
                         <td colspan="8" class="p-4 text-center text-red-600">
-                            Gagal memuat data. Periksa koneksi dan akses Firestore.
+                            Gagal memuat data: ${error.message}
                         </td>
                     </tr>
                 `;
+
+                throw error;
             }
         }
 
-        // Fungsi menyimpan data cabutan
-        window.simpanData = async function(e) {
+        // ==========================================
+        // MENAMPILKAN RIWAYAT CABUTAN
+        // ==========================================
+
+        function tampilkanTabel() {
+            tabelData.innerHTML = "";
+
+            if (dataCabutan.length === 0) {
+                tabelData.innerHTML = `
+                    <tr>
+                        <td colspan="8" class="p-4 text-center text-slate-400">
+                            Belum ada data cabutan.
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            const daftar = [...dataCabutan].sort((a, b) =>
+                String(b.tanggal || "").localeCompare(String(a.tanggal || ""))
+            );
+
+            daftar.forEach((d, index) => {
+                const tr = document.createElement("tr");
+                tr.className = "border-b hover:bg-emerald-50";
+
+                const nilai = [
+                    index + 1,
+                    d.batch || "-",
+                    d.jenis || "-",
+                    d.ukuran || "Belum dicatat",
+                    d.tanggal || "-",
+                    d.asal || "-",
+                    `${angka(d.jumlah)} Bibit`,
+                    d.lokasi || "-"
+                ];
+
+                nilai.forEach((item, i) => {
+                    const td = document.createElement("td");
+                    td.className = "p-3";
+                    td.textContent = item;
+
+                    if (i === 1) {
+                        td.classList.add("font-medium");
+                    }
+
+                    if (i === 6) {
+                        td.classList.add(
+                            "font-semibold",
+                            "text-emerald-700"
+                        );
+                    }
+
+                    tr.appendChild(td);
+                });
+
+                tabelData.appendChild(tr);
+            });
+        }
+
+        // ==========================================
+        // SIMPAN DATA CABUTAN
+        // ==========================================
+
+        formCabutan.addEventListener("submit", async function(e) {
             e.preventDefault();
 
             const jumlah = Number(
                 document.getElementById("c-jumlah").value
             );
 
+            const tanggal =
+                document.getElementById("c-tanggal").value;
+
+            const batch =
+                document.getElementById("c-batch").value.trim();
+
+            const jenis =
+                document.getElementById("c-jenis").value.trim();
+
+            const ukuran =
+                document.getElementById("c-ukuran").value.trim();
+
+            const asal =
+                document.getElementById("c-asal").value.trim();
+
+            const lokasi =
+                document.getElementById("c-lokasi").value.trim();
+
+            const keterangan =
+                document.getElementById("c-keterangan").value.trim();
+
             if (!Number.isInteger(jumlah) || jumlah <= 0) {
                 alert("Jumlah bibit harus berupa bilangan bulat lebih dari 0.");
                 return;
             }
-
-            const tanggal = document.getElementById("c-tanggal").value;
-            const batch = document.getElementById("c-batch").value.trim();
-            const jenis = document.getElementById("c-jenis").value.trim();
-            const ukuran = document.getElementById("c-ukuran").value.trim();
-            const asal = document.getElementById("c-asal").value.trim();
 
             if (!tanggal || !batch || !jenis || !ukuran || !asal) {
                 alert("Mohon lengkapi seluruh data yang wajib diisi.");
                 return;
             }
 
+            tombolSimpan.disabled = true;
+            tombolSimpan.textContent = "Memeriksa stok...";
+
             try {
+                // Membaca ulang stok terbaru sebelum menyimpan.
+                await muatData();
+
+                const sisaMedia =
+                    totalMedia - totalSapih - totalCabutan;
+
+                if (sisaMedia < 0) {
+                    alert(
+                        "Transaksi tidak dapat dilakukan karena penggunaan polybag sudah melebihi stok media."
+                    );
+                    return;
+                }
+
+                if (jumlah > sisaMedia) {
+                    alert(
+                        `Stok polybag bermedia tidak mencukupi.\n\n` +
+                        `Total media terisi: ${angka(totalMedia)}\n` +
+                        `Digunakan penyapihan: ${angka(totalSapih)}\n` +
+                        `Digunakan cabutan: ${angka(totalCabutan)}\n` +
+                        `Sisa polybag bermedia: ${angka(sisaMedia)}\n\n` +
+                        `Jumlah cabutan yang dimasukkan: ${angka(jumlah)}`
+                    );
+                    return;
+                }
+
+                tombolSimpan.textContent = "Menyimpan...";
+
                 await addDoc(collection(db, "cabutan_bibit"), {
                     batch: batch,
                     jenis: jenis,
@@ -114,24 +277,33 @@
                     tanggal: tanggal,
                     asal: asal,
                     jumlah: jumlah,
-                    lokasi: document.getElementById("c-lokasi").value.trim(),
-                    keterangan: document.getElementById("c-keterangan").value.trim(),
+                    lokasi: lokasi,
+                    keterangan: keterangan,
                     sumber: "Cabutan",
                     timestamp: new Date()
                 });
 
                 alert("Data sumber benih cabutan berhasil disimpan.");
 
-                window.location.reload();
+                formCabutan.reset();
+
+                // Memperbarui ringkasan dan riwayat tanpa reload.
+                await muatData();
 
             } catch (error) {
                 console.error("Gagal menyimpan data cabutan:", error);
-                alert("Gagal menyimpan data: " + error.message);
-            }
-        };
 
-        // Memuat tabel setelah autentikasi selesai
+                alert("Gagal menyimpan data: " + error.message);
+
+            } finally {
+                tombolSimpan.disabled = false;
+                tombolSimpan.textContent = "Simpan Data Cabutan";
+            }
+        });
+
+        // Memuat data setelah autentikasi berhasil.
         await muatData();
+
     </script>
 </head>
 
@@ -143,115 +315,151 @@
                 🌱 SIP - Sumber Benih Cabutan
             </h1>
 
-            <a href="index.html" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">
+            <a href="index.html"
+                class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">
                 Kembali
             </a>
         </div>
     </header>
 
-    <main class="max-w-6xl mx-auto px-4 py-8 space-y-8">
+    <main class="max-w-7xl mx-auto px-4 py-8 space-y-8">
 
+        <!-- RINGKASAN STOK -->
+        <section>
+            <h2 class="text-xl font-bold text-emerald-900 mb-4">
+                Ringkasan Stok Polybag Bermedia
+            </h2>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Total Media Terisi</p>
+                    <p id="total-media" class="text-2xl font-bold text-emerald-800">0</p>
+                    <p class="text-xs text-slate-400">Polybag bermedia</p>
+                </div>
+
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Digunakan Sapih</p>
+                    <p id="total-sapih" class="text-2xl font-bold text-blue-700">0</p>
+                    <p class="text-xs text-slate-400">Polybag terpakai</p>
+                </div>
+
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Digunakan Cabutan</p>
+                    <p id="total-cabutan" class="text-2xl font-bold text-amber-700">0</p>
+                    <p class="text-xs text-slate-400">Polybag terpakai</p>
+                </div>
+
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Total Terpakai</p>
+                    <p id="total-terpakai" class="text-2xl font-bold text-slate-800">0</p>
+                    <p class="text-xs text-slate-400">Sapih + cabutan</p>
+                </div>
+
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Sisa Polybag Bermedia</p>
+                    <p id="sisa-media" class="text-2xl font-bold text-green-700">0</p>
+                    <p class="text-xs text-slate-400">Belum digunakan</p>
+                </div>
+
+            </div>
+
+            <div id="peringatan-stok"
+                class="hidden mt-4 p-4 rounded-xl bg-red-100 text-red-700 font-medium">
+            </div>
+        </section>
+
+        <!-- FORM CABUTAN -->
         <section class="bg-white p-6 rounded-2xl shadow">
+
             <h2 class="text-xl font-bold text-emerald-900 mb-4">
                 Pencatatan Bibit dari Cabutan Alam
             </h2>
 
             <p class="text-sm text-slate-500 mb-4">
-                Gunakan halaman ini untuk anakan/bibit yang diperoleh melalui cabutan,
-                bukan melalui media tabur.
+                Gunakan halaman ini untuk anakan atau bibit yang diperoleh
+                melalui cabutan, bukan melalui media tabur.
+                Jumlah cabutan akan mengurangi stok polybag bermedia.
             </p>
 
-            <form onsubmit="simpanData(event)" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <form id="form-cabutan"
+                class="grid grid-cols-1 md:grid-cols-2 gap-4">
 
                 <div>
-                    <label class="block text-sm font-medium">Kode Batch Cabutan</label>
-                    <input
-                        id="c-batch"
-                        required
+                    <label class="block text-sm font-medium">
+                        Kode Batch Cabutan
+                    </label>
+                    <input id="c-batch" required
                         placeholder="CAB-PULAI-001"
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                        class="w-full mt-1 p-3 border rounded-xl">
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium">Jenis Tanaman</label>
-                    <input
-                        id="c-jenis"
-                        required
+                    <label class="block text-sm font-medium">
+                        Jenis Tanaman
+                    </label>
+                    <input id="c-jenis" required
                         placeholder="Nama lokal / nama ilmiah"
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                        class="w-full mt-1 p-3 border rounded-xl">
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium">Ukuran / Tinggi Bibit</label>
-                    <input
-                        id="c-ukuran"
-                        required
+                    <label class="block text-sm font-medium">
+                        Ukuran / Tinggi Bibit
+                    </label>
+                    <input id="c-ukuran" required
                         placeholder="Contoh: 20–30 cm atau 80–100 cm"
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                        class="w-full mt-1 p-3 border rounded-xl">
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium">Tanggal Cabutan</label>
-                    <input
-                        id="c-tanggal"
-                        type="date"
-                        required
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                    <label class="block text-sm font-medium">
+                        Tanggal Cabutan
+                    </label>
+                    <input id="c-tanggal" type="date" required
+                        class="w-full mt-1 p-3 border rounded-xl">
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium">Jumlah Bibit</label>
-                    <input
-                        id="c-jumlah"
-                        type="number"
-                        min="1"
-                        step="1"
-                        required
+                    <label class="block text-sm font-medium">
+                        Jumlah Bibit
+                    </label>
+                    <input id="c-jumlah" type="number"
+                        min="1" step="1" required
                         placeholder="500"
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                        class="w-full mt-1 p-3 border rounded-xl">
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium">Asal / Lokasi Cabutan</label>
-                    <input
-                        id="c-asal"
-                        required
+                    <label class="block text-sm font-medium">
+                        Asal / Lokasi Cabutan
+                    </label>
+                    <input id="c-asal" required
                         placeholder="Contoh: Areal regenerasi alami Blok A"
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                        class="w-full mt-1 p-3 border rounded-xl">
                 </div>
 
                 <div>
                     <label class="block text-sm font-medium">
                         Lokasi Penampungan / Bedeng
                     </label>
-                    <input
-                        id="c-lokasi"
+                    <input id="c-lokasi"
                         placeholder="Bedeng Cabutan C1"
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                        class="w-full mt-1 p-3 border rounded-xl">
                 </div>
 
                 <div class="md:col-span-2">
-                    <label class="block text-sm font-medium">Keterangan</label>
-                    <textarea
-                        id="c-keterangan"
-                        rows="2"
+                    <label class="block text-sm font-medium">
+                        Keterangan
+                    </label>
+                    <textarea id="c-keterangan" rows="2"
                         class="w-full mt-1 p-3 border rounded-xl"
-                        placeholder="Kondisi bibit, kegiatan aklimatisasi, dan catatan lainnya"
-                    ></textarea>
+                        placeholder="Kondisi bibit, kegiatan aklimatisasi, dan catatan lainnya"></textarea>
                 </div>
 
                 <div class="md:col-span-2">
-                    <button
-                        type="submit"
-                        class="w-full bg-emerald-700 text-white p-3 rounded-xl font-medium cursor-pointer"
-                    >
+                    <button id="tombol-simpan" type="submit"
+                        class="w-full bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium cursor-pointer disabled:opacity-50">
                         Simpan Data Cabutan
                     </button>
                 </div>
@@ -259,7 +467,9 @@
             </form>
         </section>
 
+        <!-- RIWAYAT CABUTAN -->
         <section class="bg-white p-6 rounded-2xl shadow">
+
             <h3 class="text-lg font-bold text-emerald-900 mb-4">
                 Riwayat Sumber Benih Cabutan
             </h3>
@@ -282,7 +492,8 @@
 
                     <tbody id="tabel-data">
                         <tr>
-                            <td colspan="8" class="p-4 text-center text-slate-400">
+                            <td colspan="8"
+                                class="p-4 text-center text-slate-400">
                                 Memuat data...
                             </td>
                         </tr>
