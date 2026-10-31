@@ -15,20 +15,207 @@
             addDoc,
             getDocs,
             query,
-            orderBy
+            orderBy,
+            deleteDoc,
+            doc
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // Memastikan pengguna sudah login
         if (!(await requireAuth())) {
             throw new Error("Login diperlukan.");
         }
 
-        // Fungsi menyimpan data pengisian polybag
+        const formatAngka = angka =>
+            Number(angka || 0).toLocaleString("id-ID");
+
+        const escapeHTML = value =>
+            String(value ?? "").replace(/[&<>"']/g, karakter => ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#039;"
+            })[karakter]);
+
+        let dataPengisian = [];
+        let dataSapih = [];
+        let dataCabutan = [];
+
+        function jumlahData(data) {
+            return data.reduce(
+                (total, item) => total + Math.max(0, Number(item.jumlah) || 0),
+                0
+            );
+        }
+
+        // Memuat seluruh data untuk menghitung persediaan polybag
+        async function muatSemuaData() {
+            const [snapIsi, snapSapih, snapCabutan] = await Promise.all([
+                getDocs(collection(db, "isi_polybag")),
+                getDocs(collection(db, "penyapihan")),
+                getDocs(collection(db, "cabutan_bibit"))
+            ]);
+
+            dataPengisian = snapIsi.docs.map(item => ({
+                id: item.id,
+                ...item.data()
+            }));
+
+            dataSapih = snapSapih.docs.map(item => ({
+                id: item.id,
+                ...item.data()
+            }));
+
+            dataCabutan = snapCabutan.docs.map(item => ({
+                id: item.id,
+                ...item.data()
+            }));
+
+            tampilkanRingkasan();
+            tampilkanRiwayat();
+            tampilkanPenggunaan();
+        }
+
+        // Ringkasan persediaan polybag
+        function tampilkanRingkasan() {
+            const totalIsi = jumlahData(dataPengisian);
+            const totalSapih = jumlahData(dataSapih);
+            const totalCabutan = jumlahData(dataCabutan);
+            const totalTerpakai = totalSapih + totalCabutan;
+            const sisa = totalIsi - totalTerpakai;
+
+            document.getElementById("total-isi").textContent =
+                formatAngka(totalIsi);
+
+            document.getElementById("total-sapih").textContent =
+                formatAngka(totalSapih);
+
+            document.getElementById("total-cabutan").textContent =
+                formatAngka(totalCabutan);
+
+            document.getElementById("total-terpakai").textContent =
+                formatAngka(totalTerpakai);
+
+            document.getElementById("sisa-polybag").textContent =
+                formatAngka(Math.max(0, sisa));
+
+            const status = document.getElementById("status-stok");
+
+            if (sisa < 0) {
+                status.className =
+                    "mt-4 p-4 rounded-xl bg-red-100 text-red-800";
+                status.innerHTML =
+                    "<strong>PERINGATAN ANOMALI!</strong><br>" +
+                    "Jumlah penggunaan penyapihan dan cabutan melebihi " +
+                    "jumlah polybag terisi media sebanyak " +
+                    formatAngka(Math.abs(sisa)) + " pcs.";
+            } else {
+                status.className =
+                    "mt-4 p-4 rounded-xl bg-emerald-100 text-emerald-800";
+                status.innerHTML =
+                    "<strong>Stok polybag tersedia.</strong><br>" +
+                    "Sisa polybag terisi media yang belum digunakan: " +
+                    formatAngka(sisa) + " pcs.";
+            }
+        }
+
+        // Riwayat pengisian media
+        function tampilkanRiwayat() {
+            const tbody = document.getElementById("tabel-data");
+
+            const data = [...dataPengisian].sort((a, b) =>
+                String(b.tanggal || "").localeCompare(String(a.tanggal || ""))
+            );
+
+            if (data.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="4" class="p-4 text-center text-slate-400">
+                            Belum ada riwayat pengisian polybag.
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = data.map((item, index) => `
+                <tr class="border-b hover:bg-emerald-50">
+                    <td class="p-3">${index + 1}</td>
+                    <td class="p-3">${escapeHTML(item.tanggal || "-")}</td>
+                    <td class="p-3 font-semibold text-emerald-700">
+                        ${formatAngka(item.jumlah)} Pcs
+                    </td>
+                    <td class="p-3">
+                        <button
+                            onclick="hapusPengisian('${item.id}')"
+                            class="bg-red-100 text-red-700 px-3 py-1.5 rounded-lg hover:bg-red-200"
+                        >
+                            Hapus
+                        </button>
+                    </td>
+                </tr>
+            `).join("");
+        }
+
+        // Tabel penggunaan otomatis dari penyapihan dan cabutan
+        function tampilkanPenggunaan() {
+            const tbody = document.getElementById("tabel-penggunaan");
+
+            const penggunaan = [
+                ...dataSapih.map(item => ({
+                    ...item,
+                    sumberTampil: "Penyapihan"
+                })),
+                ...dataCabutan.map(item => ({
+                    ...item,
+                    sumberTampil: "Cabutan Alam"
+                }))
+            ];
+
+            penggunaan.sort((a, b) =>
+                String(b.tanggal || "").localeCompare(String(a.tanggal || ""))
+            );
+
+            if (penggunaan.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" class="p-4 text-center text-slate-400">
+                            Belum ada penggunaan polybag.
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = penggunaan.map((item, index) => `
+                <tr class="border-b hover:bg-emerald-50">
+                    <td class="p-3">${index + 1}</td>
+                    <td class="p-3">${escapeHTML(item.tanggal || "-")}</td>
+                    <td class="p-3">
+                        <span class="${
+                            item.sumberTampil === "Penyapihan"
+                                ? "bg-blue-100 text-blue-700"
+                                : "bg-amber-100 text-amber-700"
+                        } px-2 py-1 rounded-lg text-xs font-semibold">
+                            ${item.sumberTampil}
+                        </span>
+                    </td>
+                    <td class="p-3">${escapeHTML(
+                        item.batch || item.kode || "-"
+                    )}</td>
+                    <td class="p-3 font-semibold text-red-600">
+                        -${formatAngka(item.jumlah)} Pcs
+                    </td>
+                </tr>
+            `).join("");
+        }
+
+        // Menyimpan pengisian polybag
         window.simpanData = async function(e) {
             e.preventDefault();
 
             const tanggal = document.getElementById("ip-tanggal").value;
             const jumlah = Number(document.getElementById("ip-jumlah").value);
+            const tombol = document.getElementById("tombol-simpan");
 
             if (!tanggal) {
                 alert("Tanggal pengisian wajib diisi.");
@@ -36,83 +223,94 @@
             }
 
             if (!Number.isInteger(jumlah) || jumlah <= 0) {
-                alert("Jumlah polybag harus berupa bilangan bulat lebih dari 0.");
+                alert("Jumlah harus berupa bilangan bulat lebih dari 0.");
                 return;
             }
 
             try {
+                tombol.disabled = true;
+                tombol.textContent = "Menyimpan...";
+
                 await addDoc(collection(db, "isi_polybag"), {
-                    tanggal: tanggal,
-                    jumlah: jumlah,
+                    tanggal,
+                    jumlah,
                     timestamp: new Date()
                 });
 
-                alert("Pengisian polybag berhasil disimpan ke Cloud!");
+                document.getElementById("form-polybag").reset();
 
-                window.location.href = "index.html";
+                alert("Pengisian polybag berhasil disimpan.");
+
+                await muatSemuaData();
 
             } catch (error) {
-                console.error("Gagal menyimpan data:", error);
+                console.error("Gagal menyimpan:", error);
                 alert("Gagal menyimpan data: " + error.message);
+            } finally {
+                tombol.disabled = false;
+                tombol.textContent = "Simpan ke Cloud";
             }
         };
 
-        // Fungsi memuat riwayat pengisian polybag
-        async function muatTabel() {
-            const tbody = document.getElementById("tabel-data");
+        // Menghapus data dengan pemeriksaan stok
+        window.hapusPengisian = async function(id) {
+            const item = dataPengisian.find(data => data.id === id);
+
+            if (!item) {
+                alert("Data pengisian tidak ditemukan.");
+                return;
+            }
+
+            const totalIsi = jumlahData(dataPengisian);
+            const totalTerpakai =
+                jumlahData(dataSapih) + jumlahData(dataCabutan);
+
+            const sisaSetelahHapus =
+                totalIsi - Number(item.jumlah || 0) - totalTerpakai;
+
+            if (sisaSetelahHapus < 0) {
+                alert(
+                    "Data tidak dapat dihapus karena akan menyebabkan " +
+                    "stok polybag menjadi negatif.\n\n" +
+                    "Kurangi atau koreksi transaksi penggunaan bibit " +
+                    "terlebih dahulu pada halaman terkait."
+                );
+                return;
+            }
+
+            const yakin = confirm(
+                "Yakin ingin menghapus data pengisian polybag tanggal " +
+                (item.tanggal || "-") + " sebanyak " +
+                formatAngka(item.jumlah) + " pcs?"
+            );
+
+            if (!yakin) return;
 
             try {
-                const q = query(
-                    collection(db, "isi_polybag"),
-                    orderBy("tanggal", "desc")
-                );
+                await deleteDoc(doc(db, "isi_polybag", id));
 
-                const querySnapshot = await getDocs(q);
+                alert("Data pengisian berhasil dihapus.");
 
-                tbody.innerHTML = "";
-
-                if (querySnapshot.empty) {
-                    tbody.innerHTML = `
-                        <tr>
-                            <td colspan="3" class="p-4 text-center text-slate-400">
-                                Belum ada riwayat pengisian polybag.
-                            </td>
-                        </tr>
-                    `;
-                    return;
-                }
-
-                let no = 1;
-
-                querySnapshot.forEach((doc) => {
-                    const d = doc.data();
-
-                    tbody.innerHTML += `
-                        <tr class="border-b">
-                            <td class="p-3">${no++}</td>
-                            <td class="p-3">${d.tanggal || "-"}</td>
-                            <td class="p-3 font-semibold text-emerald-700">
-                                ${d.jumlah ?? 0} Pcs
-                            </td>
-                        </tr>
-                    `;
-                });
+                await muatSemuaData();
 
             } catch (error) {
-                console.error("Gagal memuat tabel:", error);
-
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="3" class="p-4 text-center text-red-600">
-                            Gagal memuat data. Periksa koneksi dan akses Firestore.
-                        </td>
-                    </tr>
-                `;
+                console.error("Gagal menghapus:", error);
+                alert("Gagal menghapus data: " + error.message);
             }
-        }
+        };
 
-        // Memuat tabel setelah autentikasi selesai
-        await muatTabel();
+        try {
+            await muatSemuaData();
+        } catch (error) {
+            console.error("Gagal memuat data:", error);
+            document.getElementById("tabel-data").innerHTML = `
+                <tr>
+                    <td colspan="4" class="p-4 text-center text-red-600">
+                        Gagal memuat data. Periksa koneksi dan akses Firebase.
+                    </td>
+                </tr>
+            `;
+        }
     </script>
 </head>
 
@@ -124,87 +322,173 @@
                 🌱 SIP - Pengisian Media ke Polybag
             </h1>
 
-            <a href="index.html" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">
+            <a href="index.html"
+               class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">
                 Kembali
             </a>
         </div>
     </header>
 
-    <main class="max-w-4xl mx-auto px-4 py-8 space-y-8">
+    <main class="max-w-7xl mx-auto px-4 py-8 space-y-8">
 
-        <div class="bg-white p-6 rounded-2xl shadow">
+        <section>
+            <h2 class="text-xl font-bold text-emerald-900 mb-4">
+                Ringkasan Persediaan Polybag
+            </h2>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Total Terisi Media</p>
+                    <p id="total-isi" class="text-2xl font-bold text-emerald-700">
+                        0
+                    </p>
+                    <p class="text-xs text-slate-400">Pcs</p>
+                </div>
+
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Digunakan Penyapihan</p>
+                    <p id="total-sapih" class="text-2xl font-bold text-blue-700">
+                        0
+                    </p>
+                    <p class="text-xs text-slate-400">Pcs</p>
+                </div>
+
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Digunakan Cabutan</p>
+                    <p id="total-cabutan" class="text-2xl font-bold text-amber-700">
+                        0
+                    </p>
+                    <p class="text-xs text-slate-400">Pcs</p>
+                </div>
+
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Total Sudah Berisi Bibit</p>
+                    <p id="total-terpakai" class="text-2xl font-bold text-red-600">
+                        0
+                    </p>
+                    <p class="text-xs text-slate-400">Pcs</p>
+                </div>
+
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Sisa Polybag Kosong</p>
+                    <p id="sisa-polybag" class="text-2xl font-bold text-emerald-700">
+                        0
+                    </p>
+                    <p class="text-xs text-slate-400">Pcs</p>
+                </div>
+
+            </div>
+
+            <div id="status-stok"
+                 class="mt-4 p-4 rounded-xl bg-emerald-100 text-emerald-800">
+                Memeriksa persediaan polybag...
+            </div>
+        </section>
+
+        <section class="bg-white p-6 rounded-2xl shadow">
             <h2 class="text-xl font-bold text-emerald-900 mb-4">
                 Formulir Pengisian Polybag
             </h2>
 
-            <form onsubmit="simpanData(event)" class="space-y-4">
+            <form id="form-polybag"
+                  onsubmit="simpanData(event)"
+                  class="space-y-4">
 
                 <div>
                     <label class="block text-sm font-medium">
                         Tanggal Pengisian
                     </label>
 
-                    <input
-                        type="date"
-                        id="ip-tanggal"
-                        required
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                    <input type="date"
+                           id="ip-tanggal"
+                           required
+                           class="w-full mt-1 p-3 border rounded-xl">
                 </div>
 
                 <div>
                     <label class="block text-sm font-medium">
-                        Jumlah Polybag Terisi (Pcs)
+                        Jumlah Polybag Terisi Media (Pcs)
                     </label>
 
-                    <input
-                        type="number"
-                        id="ip-jumlah"
-                        min="1"
-                        step="1"
-                        required
-                        placeholder="3000"
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                    <input type="number"
+                           id="ip-jumlah"
+                           min="1"
+                           step="1"
+                           required
+                           placeholder="Contoh: 3000"
+                           class="w-full mt-1 p-3 border rounded-xl">
                 </div>
 
-                <button
-                    type="submit"
-                    class="w-full bg-emerald-700 text-white p-3 rounded-xl font-medium cursor-pointer"
-                >
+                <button id="tombol-simpan"
+                        type="submit"
+                        class="w-full bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium cursor-pointer">
                     Simpan ke Cloud
                 </button>
 
             </form>
-        </div>
+        </section>
 
-        <div class="bg-white p-6 rounded-2xl shadow">
-            <h3 class="text-lg font-bold text-emerald-900 mb-4">
-                Riwayat Pengisian Polybag
-            </h3>
+        <section class="bg-white p-6 rounded-2xl shadow">
+            <h2 class="text-lg font-bold text-emerald-900 mb-4">
+                Pengurangan Otomatis Penggunaan Polybag
+            </h2>
+
+            <p class="text-sm text-slate-500 mb-4">
+                Data di bawah diambil langsung dari transaksi penyapihan
+                dan cabutan alam. Tidak perlu menginput pengurangan
+                secara manual di halaman ini.
+            </p>
 
             <div class="overflow-x-auto">
                 <table class="w-full text-left border-collapse text-sm">
+                    <thead>
+                        <tr class="bg-emerald-100 text-emerald-900">
+                            <th class="p-3">No</th>
+                            <th class="p-3">Tanggal</th>
+                            <th class="p-3">Sumber Penggunaan</th>
+                            <th class="p-3">Batch</th>
+                            <th class="p-3">Jumlah Digunakan</th>
+                        </tr>
+                    </thead>
 
+                    <tbody id="tabel-penggunaan">
+                        <tr>
+                            <td colspan="5" class="p-4 text-center text-slate-400">
+                                Memuat data...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="bg-white p-6 rounded-2xl shadow">
+            <h2 class="text-lg font-bold text-emerald-900 mb-4">
+                Riwayat Pengisian Polybag
+            </h2>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-sm">
                     <thead>
                         <tr class="bg-emerald-100 text-emerald-900">
                             <th class="p-3">No</th>
                             <th class="p-3">Tanggal</th>
                             <th class="p-3">Jumlah Terisi</th>
+                            <th class="p-3">Aksi</th>
                         </tr>
                     </thead>
 
                     <tbody id="tabel-data">
                         <tr>
-                            <td colspan="3" class="p-4 text-center text-slate-400">
+                            <td colspan="4" class="p-4 text-center text-slate-400">
                                 Memuat data...
                             </td>
                         </tr>
                     </tbody>
-
                 </table>
             </div>
-        </div>
+        </section>
 
     </main>
 
