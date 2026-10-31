@@ -14,132 +14,233 @@
             addDoc,
             getDocs,
             query,
-            orderBy
+            orderBy,
+            doc,
+            updateDoc
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         if (!(await requireAuth())) {
             throw new Error("Login diperlukan.");
         }
 
+        const koleksi = collection(db, "perawatan");
         const tabelData = document.getElementById("tabel-data");
         const formPerawatan = document.getElementById("form-perawatan");
 
-        // Memuat riwayat perawatan
-        async function muatTabel() {
-            try {
-                const q = query(
-                    collection(db, "perawatan"),
-                    orderBy("tanggal", "desc")
-                );
+        let dataPerawatan = [];
+        let idEdit = null;
 
-                const querySnapshot = await getDocs(q);
+        function hariIni() {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        }
 
-                tabelData.innerHTML = "";
+        function aman(value) {
+            return String(value ?? "").replace(/[&<>"']/g, c => ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;"
+            }[c]));
+        }
 
-                if (querySnapshot.empty) {
-                    tabelData.innerHTML = `
-                        <tr>
-                            <td colspan="5" class="p-4 text-center text-slate-400">
-                                Belum ada riwayat perawatan.
-                            </td>
-                        </tr>
-                    `;
-                    return;
-                }
+        function tampilkanRingkasan() {
+            const jumlahPenyiraman = dataPerawatan.filter(d => d.jenis === "Penyiraman Rutin").length;
+            const jumlahPemupukan = dataPerawatan.filter(d => d.jenis === "Pemupukan NPK/Organik").length;
+            const jumlahPenyemprotan = dataPerawatan.filter(d => d.jenis === "Penyemprotan Pestisida").length;
 
-                let no = 1;
+            document.getElementById("ringkasan").innerHTML = `
+                <div class="bg-white p-4 rounded-xl shadow">
+                    <p class="text-sm text-slate-500">Total Kegiatan</p>
+                    <p class="text-2xl font-bold text-emerald-700">${dataPerawatan.length}</p>
+                </div>
+                <div class="bg-white p-4 rounded-xl shadow">
+                    <p class="text-sm text-slate-500">Penyiraman</p>
+                    <p class="text-2xl font-bold text-blue-700">${jumlahPenyiraman}</p>
+                </div>
+                <div class="bg-white p-4 rounded-xl shadow">
+                    <p class="text-sm text-slate-500">Pemupukan</p>
+                    <p class="text-2xl font-bold text-orange-700">${jumlahPemupukan}</p>
+                </div>
+                <div class="bg-white p-4 rounded-xl shadow">
+                    <p class="text-sm text-slate-500">Penyemprotan</p>
+                    <p class="text-2xl font-bold text-purple-700">${jumlahPenyemprotan}</p>
+                </div>
+            `;
+        }
 
-                querySnapshot.forEach((doc) => {
-                    const d = doc.data();
+        function tampilkanTabel() {
+            tabelData.innerHTML = "";
 
-                    const tr = document.createElement("tr");
-                    tr.className = "border-b hover:bg-emerald-50";
-
-                    const tdNo = document.createElement("td");
-                    tdNo.className = "p-3";
-                    tdNo.textContent = no++;
-
-                    const tdTanggal = document.createElement("td");
-                    tdTanggal.className = "p-3";
-                    tdTanggal.textContent = d.tanggal || "-";
-
-                    const tdJenis = document.createElement("td");
-                    tdJenis.className = "p-3 font-medium";
-                    tdJenis.textContent = d.jenis || "-";
-
-                    const tdLokasi = document.createElement("td");
-                    tdLokasi.className = "p-3";
-                    tdLokasi.textContent = d.lokasi || "-";
-
-                    const tdCatatan = document.createElement("td");
-                    tdCatatan.className = "p-3 text-slate-600";
-                    tdCatatan.textContent = d.catatan || "-";
-
-                    tr.append(
-                        tdNo,
-                        tdTanggal,
-                        tdJenis,
-                        tdLokasi,
-                        tdCatatan
-                    );
-
-                    tabelData.appendChild(tr);
-                });
-
-            } catch (error) {
-                console.error("Gagal memuat tabel perawatan:", error);
-
+            if (!dataPerawatan.length) {
                 tabelData.innerHTML = `
                     <tr>
-                        <td colspan="5" class="p-4 text-center text-red-600">
-                            Gagal memuat data: ${error.message}
+                        <td colspan="7" class="p-4 text-center text-slate-400">
+                            Belum ada riwayat perawatan.
+                        </td>
+                    </tr>
+                `;
+                tampilkanRingkasan();
+                return;
+            }
+
+            dataPerawatan.forEach((d, index) => {
+                const tr = document.createElement("tr");
+                tr.className = "border-b hover:bg-emerald-50";
+
+                const jumlah = d.jumlah !== undefined && d.jumlah !== null && d.jumlah !== ""
+                    ? `${Number(d.jumlah).toLocaleString("id-ID")} ${aman(d.satuan || "")}`
+                    : "-";
+
+                tr.innerHTML = `
+                    <td class="p-3">${index + 1}</td>
+                    <td class="p-3">${aman(d.tanggal || "-")}</td>
+                    <td class="p-3 font-medium">${aman(d.jenis || "-")}</td>
+                    <td class="p-3">${aman(d.lokasi || "-")}</td>
+                    <td class="p-3">${jumlah}</td>
+                    <td class="p-3 text-slate-600">${aman(d.catatan || "-")}</td>
+                    <td class="p-3 whitespace-nowrap">
+                        <button type="button" data-edit="${aman(d.id)}"
+                            class="text-blue-700 font-semibold hover:underline">
+                            Edit
+                        </button>
+                    </td>
+                `;
+
+                tabelData.appendChild(tr);
+            });
+
+            tabelData.querySelectorAll("[data-edit]").forEach(button => {
+                button.addEventListener("click", () => mulaiEdit(button.dataset.edit));
+            });
+
+            tampilkanRingkasan();
+        }
+
+        async function muatTabel() {
+            try {
+                const q = query(koleksi, orderBy("tanggal", "desc"));
+                const snapshot = await getDocs(q);
+
+                dataPerawatan = snapshot.docs.map(item => ({
+                    id: item.id,
+                    ...item.data()
+                }));
+
+                tampilkanTabel();
+            } catch (error) {
+                console.error("Gagal memuat tabel perawatan:", error);
+                tabelData.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="p-4 text-center text-red-600">
+                            Gagal memuat data: ${aman(error.message)}
                         </td>
                     </tr>
                 `;
             }
         }
 
-        // Muat tabel setelah autentikasi berhasil
-        await muatTabel();
+        function mulaiEdit(id) {
+            const data = dataPerawatan.find(item => item.id === id);
+            if (!data) return;
 
-        // Menyimpan data perawatan
-        window.simpanData = async function(e) {
+            idEdit = id;
+
+            document.getElementById("p-tanggal").value = data.tanggal || "";
+            document.getElementById("p-jenis").value = data.jenis || "Penyiraman Rutin";
+            document.getElementById("p-lokasi").value = data.lokasi || "";
+            document.getElementById("p-jumlah").value = data.jumlah ?? "";
+            document.getElementById("p-satuan").value = data.satuan || "";
+            document.getElementById("p-catatan").value = data.catatan || "";
+
+            document.getElementById("judul-form").textContent = "Edit Data Perawatan";
+            document.getElementById("tombol-simpan").textContent = "Simpan Perubahan";
+            document.getElementById("tombol-batal").classList.remove("hidden");
+
+            formPerawatan.scrollIntoView({ behavior: "smooth" });
+        }
+
+        function batalEdit() {
+            idEdit = null;
+            formPerawatan.reset();
+
+            document.getElementById("p-tanggal").value = hariIni();
+            document.getElementById("judul-form").textContent = "Catat Jadwal Penyiraman & Pemupukan";
+            document.getElementById("tombol-simpan").textContent = "Simpan ke Cloud";
+            document.getElementById("tombol-batal").classList.add("hidden");
+        }
+
+        document.getElementById("tombol-batal").addEventListener("click", batalEdit);
+
+        document.getElementById("jenis-lainnya").addEventListener("change", function() {
+            document.getElementById("p-jenis").value = this.value;
+        });
+
+        formPerawatan.addEventListener("submit", async function(e) {
             e.preventDefault();
 
             const tanggal = document.getElementById("p-tanggal").value;
             const jenis = document.getElementById("p-jenis").value;
             const lokasi = document.getElementById("p-lokasi").value.trim();
+            const jumlahInput = document.getElementById("p-jumlah").value;
+            const satuan = document.getElementById("p-satuan").value;
             const catatan = document.getElementById("p-catatan").value.trim();
+
+            const jumlah = jumlahInput === "" ? null : Number(jumlahInput);
 
             if (!tanggal || !jenis || !lokasi) {
                 alert("Tanggal, jenis kegiatan, dan lokasi wajib diisi.");
                 return;
             }
 
-            const tombol = formPerawatan.querySelector('button[type="submit"]');
+            if (jumlah !== null && (!Number.isFinite(jumlah) || jumlah <= 0)) {
+                alert("Jumlah pemakaian harus lebih dari nol.");
+                return;
+            }
+
+            if (jumlah !== null && !satuan) {
+                alert("Pilih satuan untuk jumlah pemakaian.");
+                return;
+            }
+
+            const tombol = document.getElementById("tombol-simpan");
             tombol.disabled = true;
             tombol.textContent = "Menyimpan...";
 
-            try {
-                await addDoc(collection(db, "perawatan"), {
-                    tanggal: tanggal,
-                    jenis: jenis,
-                    lokasi: lokasi,
-                    catatan: catatan,
-                    timestamp: new Date()
-                });
+            const payload = {
+                tanggal,
+                jenis,
+                lokasi,
+                catatan,
+                jumlah,
+                satuan,
+                timestamp: new Date()
+            };
 
-                alert("Log perawatan berhasil disimpan ke Cloud!");
-                window.location.href = "index.html";
+            try {
+                if (idEdit) {
+                    await updateDoc(doc(db, "perawatan", idEdit), payload);
+                    alert("Data perawatan berhasil diperbarui.");
+                } else {
+                    await addDoc(koleksi, payload);
+                    alert("Log perawatan berhasil disimpan.");
+                }
+
+                batalEdit();
+                await muatTabel();
 
             } catch (error) {
                 console.error("Gagal menyimpan perawatan:", error);
                 alert("Gagal menyimpan data: " + error.message);
-
+            } finally {
                 tombol.disabled = false;
-                tombol.textContent = "Simpan ke Cloud";
+                tombol.textContent = idEdit ? "Simpan Perubahan" : "Simpan ke Cloud";
             }
-        };
+        });
+
+        document.getElementById("p-tanggal").value = hariIni();
+        await muatTabel();
     </script>
 </head>
 
@@ -148,45 +249,36 @@
     <header class="bg-emerald-800 text-white shadow-md">
         <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
             <h1 class="text-xl font-bold">🌱 SIP - Log Perawatan</h1>
-
             <a href="index.html" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">
                 Kembali
             </a>
         </div>
     </header>
 
-    <main class="max-w-4xl mx-auto px-4 py-8 space-y-8">
+    <main class="max-w-6xl mx-auto px-4 py-8 space-y-8">
 
-        <div class="bg-white p-6 rounded-2xl shadow">
-            <h2 class="text-xl font-bold text-emerald-900 mb-4">
+        <section>
+            <h2 class="text-lg font-bold text-emerald-900 mb-3">Ringkasan Kegiatan Perawatan</h2>
+            <div id="ringkasan" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="bg-white p-4 rounded-xl shadow">Memuat data...</div>
+            </div>
+        </section>
+
+        <section class="bg-white p-6 rounded-2xl shadow">
+            <h2 id="judul-form" class="text-xl font-bold text-emerald-900 mb-4">
                 Catat Jadwal Penyiraman & Pemupukan
             </h2>
 
-            <form id="form-perawatan" onsubmit="simpanData(event)" class="space-y-4">
+            <form id="form-perawatan" class="space-y-4">
 
                 <div>
-                    <label class="block text-sm font-medium">
-                        Tanggal Kegiatan
-                    </label>
-
-                    <input
-                        type="date"
-                        id="p-tanggal"
-                        required
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                    <label class="block text-sm font-medium">Tanggal Kegiatan</label>
+                    <input type="date" id="p-tanggal" required class="w-full mt-1 p-3 border rounded-xl">
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium">
-                        Jenis Kegiatan
-                    </label>
-
-                    <select
-                        id="p-jenis"
-                        required
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                    <label class="block text-sm font-medium">Jenis Kegiatan</label>
+                    <select id="p-jenis" required class="w-full mt-1 p-3 border rounded-xl">
                         <option value="Penyiraman Rutin">Penyiraman Rutin</option>
                         <option value="Pemupukan NPK/Organik">Pemupukan NPK/Organik</option>
                         <option value="Penyemprotan Pestisida">Penyemprotan Pestisida</option>
@@ -194,72 +286,71 @@
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium">
-                        Lokasi Blok / Bedeng
-                    </label>
+                    <label class="block text-sm font-medium">Lokasi Blok / Bedeng</label>
+                    <input type="text" id="p-lokasi" required placeholder="Contoh: Blok B3" class="w-full mt-1 p-3 border rounded-xl">
+                </div>
 
-                    <input
-                        type="text"
-                        id="p-lokasi"
-                        required
-                        placeholder="Contoh: Blok B3"
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium">Jumlah Pemakaian (opsional)</label>
+                        <input type="number" id="p-jumlah" min="0.01" step="0.01" placeholder="Contoh: 5" class="w-full mt-1 p-3 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium">Satuan</label>
+                        <select id="p-satuan" class="w-full mt-1 p-3 border rounded-xl">
+                            <option value="">Pilih satuan</option>
+                            <option value="liter">Liter</option>
+                            <option value="kg">Kilogram (kg)</option>
+                            <option value="gram">Gram</option>
+                            <option value="m³">Meter kubik (m³)</option>
+                            <option value="karung">Karung</option>
+                            <option value="tangki">Tangki</option>
+                            <option value="paket">Paket</option>
+                        </select>
+                    </div>
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium">
-                        Catatan / Dosis
-                    </label>
-
-                    <textarea
-                        id="p-catatan"
-                        placeholder="Contoh: Dosis 2 gram per liter air"
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    ></textarea>
+                    <label class="block text-sm font-medium">Catatan / Dosis</label>
+                    <textarea id="p-catatan" placeholder="Contoh: Dosis 2 gram per liter air" class="w-full mt-1 p-3 border rounded-xl"></textarea>
                 </div>
 
-                <button
-                    type="submit"
-                    class="w-full bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium cursor-pointer disabled:opacity-50"
-                >
-                    Simpan ke Cloud
-                </button>
-
+                <div class="flex gap-2">
+                    <button id="tombol-simpan" type="submit" class="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium disabled:opacity-50">
+                        Simpan ke Cloud
+                    </button>
+                    <button id="tombol-batal" type="button" class="hidden bg-slate-200 px-4 rounded-xl">
+                        Batal
+                    </button>
+                </div>
             </form>
-        </div>
+        </section>
 
-        <div class="bg-white p-6 rounded-2xl shadow">
-            <h3 class="text-lg font-bold text-emerald-900 mb-4">
-                Riwayat Log Perawatan
-            </h3>
+        <section class="bg-white p-6 rounded-2xl shadow">
+            <h3 class="text-lg font-bold text-emerald-900 mb-4">Riwayat Log Perawatan</h3>
 
             <div class="overflow-x-auto">
                 <table class="w-full text-left border-collapse text-sm">
-
                     <thead>
                         <tr class="bg-emerald-100 text-emerald-900">
                             <th class="p-3">No</th>
                             <th class="p-3">Tanggal</th>
                             <th class="p-3">Kegiatan</th>
                             <th class="p-3">Lokasi</th>
+                            <th class="p-3">Jumlah</th>
                             <th class="p-3">Catatan</th>
+                            <th class="p-3">Aksi</th>
                         </tr>
                     </thead>
-
                     <tbody id="tabel-data">
                         <tr>
-                            <td colspan="5" class="p-4 text-center text-slate-400">
-                                Memuat data...
-                            </td>
+                            <td colspan="7" class="p-4 text-center text-slate-400">Memuat data...</td>
                         </tr>
                     </tbody>
-
                 </table>
             </div>
-        </div>
+        </section>
 
     </main>
-
 </body>
 </html>
