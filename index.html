@@ -55,7 +55,7 @@
                 batch || "Tanpa batch"
             ]);
 
-        // GRAFIK PERKEMBANGAN
+        // GRAFIK PERKEMBANGAN 12 BULAN
         function gambarGrafik(
             snapTabur,
             snapSapih,
@@ -65,7 +65,8 @@
             const sekarang = new Date();
             const bulan = [];
 
-            for (let i = 5; i >= 0; i--) {
+            // MENAMPILKAN 12 BULAN TERAKHIR
+            for (let i = 11; i >= 0; i--) {
                 bulan.push(
                     new Date(
                         sekarang.getFullYear(),
@@ -179,6 +180,14 @@
 
                             ticks: {
                                 callback: v => formatAngka(v)
+                            }
+                        },
+
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 0,
+                                autoSkip: false
                             }
                         }
                     }
@@ -653,7 +662,7 @@
                     "Data berhasil diperbarui: " +
                     new Date().toLocaleString("id-ID");
 
-                // GRAFIK
+                // GRAFIK 12 BULAN
                 gambarGrafik(
                     snapTabur,
                     snapSapih,
@@ -988,7 +997,7 @@
                             </h3>
 
                             <p class="text-xs text-slate-500">
-                                Pergerakan data enam bulan terakhir berdasarkan tanggal pencatatan.
+                                Pergerakan data 12 bulan terakhir berdasarkan tanggal pencatatan.
                             </p>
                         </div>
 
