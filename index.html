@@ -19,13 +19,78 @@
 
         let chartPerkembangan = null;
 
-        const jumlah = d => Number(d?.jumlah || 0);
+        // ==========================================
+        // FUNGSI DASAR
+        // ==========================================
+
+        const jumlah = d => {
+            const n = Number(d?.jumlah);
+            return Number.isFinite(n) && n >= 0 ? n : 0;
+        };
+
+        const jumlahValid = value =>
+            value !== null &&
+            value !== undefined &&
+            value !== "" &&
+            Number.isFinite(Number(value)) &&
+            Number(value) >= 0;
 
         const formatAngka = n =>
             Number(n || 0).toLocaleString("id-ID");
 
+        const teks = value =>
+            String(value ?? "").trim();
+
+        const normalBatch = value =>
+            teks(value).toUpperCase();
+
+        const normalJenis = value =>
+            teks(value).toLowerCase().replace(/\s+/g, " ");
+
+        const normalSumber = value => {
+            const s = teks(value).toLowerCase();
+
+            if (
+                s === "media tabur" ||
+                s === "tabur"
+            ) {
+                return "Media tabur";
+            }
+
+            if (
+                s === "cabutan" ||
+                s === "sumber benih cabutan"
+            ) {
+                return "Cabutan";
+            }
+
+            return "";
+        };
+
+        const sumberDistribusi = d =>
+            normalSumber(d?.sumber);
+
+        const sumberOpname = d =>
+            normalSumber(d?.sumber);
+
+        const kunci = (sumber, batch, jenis = "") =>
+            JSON.stringify([
+                sumber || "Belum tercatat",
+                normalBatch(batch) || "Tanpa batch",
+                normalJenis(jenis)
+            ]);
+
         const tanggalValid = value => {
             if (!value) return null;
+
+            if (value?.toDate) {
+                const dt = value.toDate();
+                return Number.isNaN(dt.getTime()) ? null : dt;
+            }
+
+            if (value instanceof Date) {
+                return Number.isNaN(value.getTime()) ? null : value;
+            }
 
             if (typeof value === "string") {
                 const dt = new Date(
@@ -37,25 +102,17 @@
                 return Number.isNaN(dt.getTime()) ? null : dt;
             }
 
-            if (value?.toDate) return value.toDate();
-            if (value instanceof Date) return value;
-
             return null;
         };
 
-        const sumberDistribusi = d =>
-            d.sumber || "Media tabur";
+        const tanggalDokumen = d =>
+            tanggalValid(d?.timestamp) ||
+            tanggalValid(d?.tanggal);
 
-        const sumberOpname = d =>
-            d.sumber || "Belum tercatat";
-
-        const kunci = (sumber, batch) =>
-            JSON.stringify([
-                sumber || "Belum tercatat",
-                batch || "Tanpa batch"
-            ]);
-
+        // ==========================================
         // GRAFIK PERKEMBANGAN 12 BULAN
+        // ==========================================
+
         function gambarGrafik(
             snapTabur,
             snapSapih,
@@ -65,7 +122,6 @@
             const sekarang = new Date();
             const bulan = [];
 
-            // MENAMPILKAN 12 BULAN TERAKHIR
             for (let i = 11; i >= 0; i--) {
                 bulan.push(
                     new Date(
@@ -94,10 +150,7 @@
 
                     snap.forEach(item => {
                         const d = item.data();
-
-                        const dt =
-                            tanggalValid(d.tanggal) ||
-                            tanggalValid(d.timestamp);
+                        const dt = tanggalDokumen(d);
 
                         if (
                             dt &&
@@ -177,7 +230,6 @@
                     scales: {
                         y: {
                             beginAtZero: true,
-
                             ticks: {
                                 callback: v => formatAngka(v)
                             }
@@ -195,7 +247,10 @@
             });
         }
 
-        // PEMERIKSAAN ANOMALI
+        // ==========================================
+        // PEMERIKSAAN ANOMALI DATA
+        // ==========================================
+
         function tampilkanAnomali(data) {
             const {
                 snapTabur,
@@ -207,210 +262,386 @@
             } = data;
 
             const alerts = [];
+            const alertKeys = new Set();
 
-            // 1. Rekap tabur per batch
-            const taburByBatch = {};
+            function tambahAnomali(level, kode, title, detail) {
+                if (alertKeys.has(kode)) return;
 
-            snapTabur.forEach(x => {
-                const d = x.data();
-                const batch = d.kode || "";
+                alertKeys.add(kode);
+                alerts.push({
+                    level,
+                    title,
+                    detail
+                });
+            }
 
-                if (!batch) return;
+            // --------------------------------------
+            // 1. VALIDASI DATA DASAR
+            // --------------------------------------
 
-                taburByBatch[batch] =
-                    (taburByBatch[batch] || 0) + jumlah(d);
-            });
+            function periksaJumlah(snapshot, nama) {
+                snapshot.forEach(doc => {
+                    const d = doc.data();
 
-            // 2. Rekap penyapihan per batch
-            const sapihByBatch = {};
+                    if (!jumlahValid(d.jumlah)) {
+                        tambahAnomali(
+                            "danger",
+                            `jumlah-${nama}-${doc.id}`,
+                            `Jumlah tidak valid: ${nama}`,
+                            `Dokumen ${doc.id} memiliki jumlah kosong, bukan angka, atau bernilai negatif. Periksa kembali data.`
+                        );
 
-            snapSapih.forEach(x => {
-                const d = x.data();
-                const batch = d.batch || "";
-
-                if (!batch) return;
-
-                sapihByBatch[batch] =
-                    (sapihByBatch[batch] || 0) + jumlah(d);
-            });
-
-            Object.entries(sapihByBatch).forEach(
-                ([batch, total]) => {
-                    const tabur = taburByBatch[batch] || 0;
-
-                    if (total > tabur) {
-                        alerts.push({
-                            level: "danger",
-                            title: `Penyapihan melebihi tabur: ${batch}`,
-                            detail:
-                                `Tercatat ${formatAngka(total)} bibit disapih, ` +
-                                `sedangkan tabur tercatat ${formatAngka(tabur)} butir. ` +
-                                `Periksa kode batch dan jumlah input.`
-                        });
+                        return;
                     }
-                }
-            );
 
-            // 3. Rekap produksi berdasarkan sumber dan batch
+                    if (!Number.isInteger(Number(d.jumlah))) {
+                        tambahAnomali(
+                            "warning",
+                            `desimal-${nama}-${doc.id}`,
+                            `Jumlah bukan bilangan bulat: ${nama}`,
+                            `Dokumen ${doc.id} memiliki jumlah ${d.jumlah}. Jumlah bibit dan polybag seharusnya berupa bilangan bulat.`
+                        );
+                    }
+                });
+            }
+
+            periksaJumlah(snapTabur, "Tabur benih");
+            periksaJumlah(snapSapih, "Penyapihan");
+            periksaJumlah(snapCabutan, "Cabutan bibit");
+            periksaJumlah(snapDist, "Distribusi");
+            periksaJumlah(snapPolybag, "Pengisian polybag");
+            periksaJumlah(snapOpname, "Opname fisik");
+
+            // --------------------------------------
+            // 2. REKAP BENIH DITABUR
+            // Berdasarkan batch + jenis tanaman
+            // --------------------------------------
+
+            const tabur = {};
+
+            snapTabur.forEach(doc => {
+                const d = doc.data();
+
+                const batch = normalBatch(d.kode);
+                const jenis = normalJenis(d.jenis);
+
+                if (!batch || !jenis || !jumlahValid(d.jumlah)) {
+                    if (!batch || !jenis) {
+                        tambahAnomali(
+                            "warning",
+                            `tabur-identitas-${doc.id}`,
+                            "Identitas data tabur belum lengkap",
+                            `Dokumen ${doc.id} belum memiliki kode batch atau jenis tanaman.`
+                        );
+                    }
+
+                    return;
+                }
+
+                const key = kunci("Media tabur", batch, jenis);
+
+                tabur[key] = (tabur[key] || 0) + Number(d.jumlah);
+            });
+
+            // --------------------------------------
+            // 3. REKAP PRODUKSI BIBIT
+            // --------------------------------------
+
             const produksi = {};
 
-            snapSapih.forEach(x => {
-                const d = x.data();
-                const batch = d.batch || "";
+            function tambahProduksi(snapshot, sumber, nama) {
+                snapshot.forEach(doc => {
+                    const d = doc.data();
 
-                if (!batch) return;
+                    const batch = normalBatch(d.batch);
+                    const jenis = normalJenis(d.jenis);
 
-                const k = kunci("Media tabur", batch);
+                    if (!batch || !jenis || !jumlahValid(d.jumlah)) {
+                        if (!batch || !jenis) {
+                            tambahAnomali(
+                                "warning",
+                                `produksi-identitas-${nama}-${doc.id}`,
+                                `Identitas data ${nama} belum lengkap`,
+                                `Dokumen ${doc.id} belum memiliki kode batch atau jenis tanaman yang lengkap.`
+                            );
+                        }
 
-                produksi[k] =
-                    (produksi[k] || 0) + jumlah(d);
+                        return;
+                    }
+
+                    const key = kunci(sumber, batch, jenis);
+
+                    produksi[key] =
+                        (produksi[key] || 0) + Number(d.jumlah);
+                });
+            }
+
+            tambahProduksi(snapSapih, "Media tabur", "penyapihan");
+            tambahProduksi(snapCabutan, "Cabutan", "cabutan");
+
+            // --------------------------------------
+            // 4. CEK PENYAPIHAN MELEBIHI TABUR
+            // --------------------------------------
+
+            Object.entries(produksi).forEach(([key, totalSapih]) => {
+                const [sumber, batch, jenis] = JSON.parse(key);
+
+                if (sumber !== "Media tabur") return;
+
+                if (tabur[key] === undefined) {
+                    tambahAnomali(
+                        "warning",
+                        `tabur-tidak-ditemukan-${key}`,
+                        `Data tabur tidak ditemukan: ${batch}`,
+                        `Penyapihan jenis ${jenis} tercatat, tetapi data tabur dengan batch dan jenis yang sama tidak ditemukan.`
+                    );
+
+                    return;
+                }
+
+                const totalTabur = tabur[key];
+
+                if (totalSapih > totalTabur) {
+                    tambahAnomali(
+                        "danger",
+                        `sapih-melebihi-tabur-${key}`,
+                        `Penyapihan melebihi tabur: ${batch}`,
+                        `Jenis ${jenis}. Penyapihan ${formatAngka(totalSapih)} bibit, sedangkan tabur ${formatAngka(totalTabur)} butir. Periksa kemungkinan input ganda atau kesalahan batch.`
+                    );
+                }
             });
 
-            snapCabutan.forEach(x => {
-                const d = x.data();
-                const batch = d.batch || "";
+            // --------------------------------------
+            // 5. REKAP DISTRIBUSI
+            // --------------------------------------
 
-                if (!batch) return;
-
-                const k = kunci("Cabutan", batch);
-
-                produksi[k] =
-                    (produksi[k] || 0) + jumlah(d);
-            });
-
-            // 4. Rekap distribusi
             const distribusi = {};
 
-            snapDist.forEach(x => {
-                const d = x.data();
+            snapDist.forEach(doc => {
+                const d = doc.data();
+
                 const sumber = sumberDistribusi(d);
-                const batch = d.batch || "";
+                const batch = normalBatch(d.batch);
+                const jenis = normalJenis(d.jenis);
 
-                if (!batch) return;
+                if (!sumber) {
+                    tambahAnomali(
+                        "warning",
+                        `dist-sumber-${doc.id}`,
+                        "Sumber distribusi belum jelas",
+                        `Dokumen ${doc.id} tidak memiliki sumber bibit yang dikenali. Sistem tidak menebak sumber bibit agar stok tidak salah dihitung.`
+                    );
 
-                const k = kunci(sumber, batch);
+                    return;
+                }
 
-                distribusi[k] =
-                    (distribusi[k] || 0) + jumlah(d);
+                if (!batch || !jenis) {
+                    tambahAnomali(
+                        "warning",
+                        `dist-identitas-${doc.id}`,
+                        "Identitas distribusi belum lengkap",
+                        `Dokumen ${doc.id} belum memiliki kode batch atau jenis tanaman.`
+                    );
+
+                    return;
+                }
+
+                if (!jumlahValid(d.jumlah)) return;
+
+                const key = kunci(sumber, batch, jenis);
+
+                distribusi[key] =
+                    (distribusi[key] || 0) + Number(d.jumlah);
+
+                if (!teks(d.ukuran)) {
+                    tambahAnomali(
+                        "warning",
+                        `dist-ukuran-${doc.id}`,
+                        "Ukuran bibit distribusi belum tercatat",
+                        `Dokumen distribusi ${doc.id} belum memiliki informasi ukuran bibit.`
+                    );
+                }
             });
 
-            Object.entries(distribusi).forEach(
-                ([k, totalKeluar]) => {
-                    const totalProduksi = produksi[k] || 0;
+            // --------------------------------------
+            // 6. DISTRIBUSI MELEBIHI PRODUKSI
+            // --------------------------------------
 
-                    if (totalKeluar > totalProduksi) {
-                        const [sumber, batch] = JSON.parse(k);
+            Object.entries(distribusi).forEach(([key, totalKeluar]) => {
+                const totalProduksi = produksi[key];
 
-                        alerts.push({
-                            level: "danger",
-                            title: `Distribusi melebihi stok: ${batch}`,
-                            detail:
-                                `Sumber ${sumber}. Distribusi ${formatAngka(totalKeluar)} bibit, ` +
-                                `sedangkan produksi tercatat ${formatAngka(totalProduksi)} bibit. ` +
-                                `Kelebihan ${formatAngka(totalKeluar - totalProduksi)} bibit.`
-                        });
-                    }
+                const [sumber, batch, jenis] = JSON.parse(key);
+
+                if (totalProduksi === undefined) {
+                    tambahAnomali(
+                        "warning",
+                        `produksi-kosong-${key}`,
+                        `Data produksi tidak ditemukan: ${batch}`,
+                        `Distribusi jenis ${jenis} dari sumber ${sumber} tercatat ${formatAngka(totalKeluar)} bibit, tetapi data produksi dengan identitas yang sama tidak ditemukan.`
+                    );
+
+                    return;
                 }
-            );
 
-            // 5. Pemeriksaan pemakaian media polybag
-            const totalPolybag = snapPolybag.docs.reduce(
-                (a, x) => a + jumlah(x.data()),
-                0
-            );
+                if (totalKeluar > totalProduksi) {
+                    tambahAnomali(
+                        "danger",
+                        `distribusi-melebihi-produksi-${key}`,
+                        `Distribusi melebihi produksi: ${batch}`,
+                        `Jenis ${jenis}, sumber ${sumber}. Distribusi ${formatAngka(totalKeluar)} bibit, sedangkan produksi ${formatAngka(totalProduksi)} bibit. Kelebihan ${formatAngka(totalKeluar - totalProduksi)} bibit.`
+                    );
+                }
+            });
 
-            const totalSapih = snapSapih.docs.reduce(
-                (a, x) => a + jumlah(x.data()),
-                0
-            );
+            // --------------------------------------
+            // 7. PEMAKAIAN POLYBAG
+            // --------------------------------------
 
-            const totalCabutan = snapCabutan.docs.reduce(
-                (a, x) => a + jumlah(x.data()),
-                0
-            );
+            const jumlahSnapshot = snapshot =>
+                snapshot.docs.reduce((total, doc) => {
+                    const d = doc.data();
+
+                    return total + (
+                        jumlahValid(d.jumlah)
+                            ? Number(d.jumlah)
+                            : 0
+                    );
+                }, 0);
+
+            const totalPolybag = jumlahSnapshot(snapPolybag);
+            const totalSapih = jumlahSnapshot(snapSapih);
+            const totalCabutan = jumlahSnapshot(snapCabutan);
 
             const totalPemakaian = totalSapih + totalCabutan;
 
             if (totalPemakaian > totalPolybag) {
-                alerts.push({
-                    level: "warning",
-                    title: "Pemakaian media melebihi polybag terisi",
-                    detail:
-                        `Pemakaian tercatat ${formatAngka(totalPemakaian)} polybag ` +
-                        `(${formatAngka(totalSapih)} penyapihan dan ` +
-                        `${formatAngka(totalCabutan)} cabutan), sedangkan ` +
-                        `pengisian media tercatat ${formatAngka(totalPolybag)} pcs. ` +
-                        `Periksa kelengkapan pencatatan.`
-                });
+                tambahAnomali(
+                    "danger",
+                    "polybag-melebihi-pengisian",
+                    "Pemakaian media melebihi polybag terisi",
+                    `Pemakaian ${formatAngka(totalPemakaian)} polybag, terdiri dari penyapihan ${formatAngka(totalSapih)} dan cabutan ${formatAngka(totalCabutan)}. Pengisian media hanya ${formatAngka(totalPolybag)} pcs. Periksa pencatatan dan kemungkinan input ganda.`
+                );
             }
 
-            // 6. Opname terbaru per sumber dan batch
+            // --------------------------------------
+            // 8. OPNAME TERBARU
+            // Berdasarkan sumber + batch + jenis
+            // --------------------------------------
+
             const opnameTerbaru = {};
 
-            snapOpname.forEach(x => {
-                const d = x.data();
-                const sumber = sumberOpname(d);
-                const batch = d.batch || "";
+            snapOpname.forEach(doc => {
+                const d = doc.data();
 
-                if (!batch || sumber === "Belum tercatat") {
+                const sumber = sumberOpname(d);
+                const batch = normalBatch(d.batch);
+                const jenis = normalJenis(d.jenis);
+
+                if (!sumber || !batch || !jenis) {
+                    tambahAnomali(
+                        "warning",
+                        `opname-identitas-${doc.id}`,
+                        "Identitas data opname belum lengkap",
+                        `Dokumen opname ${doc.id} belum memiliki sumber, batch, atau jenis tanaman yang lengkap. Data ini tidak dibandingkan dengan stok sistem.`
+                    );
+
                     return;
                 }
 
-                const k = kunci(sumber, batch);
+                if (!jumlahValid(d.jumlah)) return;
 
-                const dt =
-                    tanggalValid(d.timestamp) ||
-                    tanggalValid(d.tanggal) ||
-                    new Date(0);
+                const tanggal = tanggalDokumen(d);
+
+                if (!tanggal) {
+                    tambahAnomali(
+                        "warning",
+                        `opname-tanggal-${doc.id}`,
+                        "Tanggal opname tidak valid",
+                        `Dokumen opname ${doc.id} tidak memiliki tanggal yang dapat dibaca.`
+                    );
+
+                    return;
+                }
+
+                const key = kunci(sumber, batch, jenis);
 
                 if (
-                    !opnameTerbaru[k] ||
-                    dt > opnameTerbaru[k].tanggal
+                    !opnameTerbaru[key] ||
+                    tanggal > opnameTerbaru[key].tanggal
                 ) {
-                    opnameTerbaru[k] = {
-                        jumlah: jumlah(d),
-                        tanggal: dt
+                    opnameTerbaru[key] = {
+                        jumlah: Number(d.jumlah),
+                        tanggal
                     };
                 }
             });
 
-            // 7. Bandingkan opname dengan perkiraan stok
-            Object.entries(opnameTerbaru).forEach(
-                ([k, opname]) => {
-                    const totalProduksi = produksi[k] || 0;
-                    const totalKeluar = distribusi[k] || 0;
+            // --------------------------------------
+            // 9. BANDINGKAN OPNAME DENGAN STOK SISTEM
+            // --------------------------------------
 
-                    const perkiraan =
-                        totalProduksi - totalKeluar;
+            Object.entries(opnameTerbaru).forEach(([key, opname]) => {
+                const [sumber, batch, jenis] = JSON.parse(key);
 
-                    if (opname.jumlah !== perkiraan) {
-                        const [sumber, batch] = JSON.parse(k);
+                const totalProduksi = produksi[key];
 
-                        alerts.push({
-                            level: "warning",
-                            title:
-                                `Opname berbeda dari hitungan sistem: ${batch}`,
-                            detail:
-                                `Sumber ${sumber}. Opname terakhir ${formatAngka(opname.jumlah)} bibit; ` +
-                                `perkiraan sistem ${formatAngka(perkiraan)} bibit. ` +
-                                `Selisih ${formatAngka(Math.abs(opname.jumlah - perkiraan))} bibit. ` +
-                                `Periksa kematian, kehilangan, pemindahan, dan distribusi.`
-                        });
+                if (totalProduksi === undefined) {
+                    if (opname.jumlah > 0) {
+                        tambahAnomali(
+                            "warning",
+                            `opname-produksi-tidak-ada-${key}`,
+                            `Produksi tidak ditemukan untuk opname: ${batch}`,
+                            `Opname jenis ${jenis}, sumber ${sumber} tercatat ${formatAngka(opname.jumlah)} bibit, tetapi data produksi tidak ditemukan.`
+                        );
                     }
-                }
-            );
 
-            // 8. Tampilkan peringatan
+                    return;
+                }
+
+                const totalKeluar = distribusi[key] || 0;
+                const stokSistem = totalProduksi - totalKeluar;
+
+                if (stokSistem < 0) return;
+
+                if (opname.jumlah !== stokSistem) {
+                    tambahAnomali(
+                        "warning",
+                        `opname-berbeda-${key}`,
+                        `Opname berbeda dari stok sistem: ${batch}`,
+                        `Jenis ${jenis}, sumber ${sumber}. Opname fisik ${formatAngka(opname.jumlah)} bibit, sedangkan stok sistem ${formatAngka(stokSistem)} bibit. Selisih ${formatAngka(Math.abs(opname.jumlah - stokSistem))} bibit. Periksa kematian, kehilangan, pemindahan, atau pencatatan distribusi.`
+                    );
+                }
+            });
+
+            // --------------------------------------
+            // 10. URUTKAN PERINGATAN
+            // --------------------------------------
+
+            alerts.sort((a, b) => {
+                const urutan = {
+                    danger: 0,
+                    warning: 1
+                };
+
+                return urutan[a.level] - urutan[b.level];
+            });
+
+            // --------------------------------------
+            // 11. TAMPILKAN HASIL
+            // --------------------------------------
+
             const container =
                 document.getElementById("daftar-anomali");
 
             const count =
                 document.getElementById("jumlah-anomali");
 
+            if (!container || !count) return;
+
             count.textContent = alerts.length;
             container.replaceChildren();
 
-            if (!alerts.length) {
+            if (alerts.length === 0) {
                 const box = document.createElement("div");
 
                 box.className =
@@ -420,15 +651,14 @@
                 const title = document.createElement("strong");
 
                 title.textContent =
-                    "Belum ditemukan ketidakseimbangan dari pemeriksaan dasar.";
+                    "Belum ditemukan ketidakseimbangan dari pemeriksaan.";
 
                 const detail = document.createElement("p");
 
                 detail.className = "text-sm mt-1";
 
                 detail.textContent =
-                    "Pemeriksaan ini berdasarkan data yang sudah diinput. " +
-                    "Tetap lakukan opname fisik secara berkala.";
+                    "Pemeriksaan berdasarkan data yang tersedia dan dapat dikenali. Tetap lakukan pemeriksaan dokumen serta opname fisik secara berkala.";
 
                 box.append(title, detail);
                 container.appendChild(box);
@@ -480,7 +710,10 @@
             });
         }
 
+        // ==========================================
         // MEMUAT DATA FIRESTORE
+        // ==========================================
+
         async function muatDataCloud() {
             const status =
                 document.getElementById("status-dashboard");
@@ -506,23 +739,32 @@
                     getDocs(collection(db, "distribusi_das"))
                 ]);
 
+                // ----------------------------------
                 // STOK BAHAN MEDIA
+                // ----------------------------------
+
                 let totalTanah = 0;
                 let totalPupuk = 0;
 
-                snapBahan.forEach(x => {
-                    const d = x.data();
+                snapBahan.forEach(doc => {
+                    const d = doc.data();
+                    const volume = Number(d.volume || 0);
+
+                    if (!Number.isFinite(volume)) return;
 
                     if (d.jenis === "Tanah Topsoil") {
-                        totalTanah += Number(d.volume || 0);
+                        totalTanah += volume;
                     }
 
                     if (d.jenis === "Pupuk Organik / Kompos") {
-                        totalPupuk += Number(d.volume || 0);
+                        totalPupuk += volume;
                     }
                 });
 
+                // ----------------------------------
                 // PENGISIAN DAN PEMAKAIAN POLYBAG
+                // ----------------------------------
+
                 const totalPolybag = snapPolybag.docs.reduce(
                     (a, x) => a + jumlah(x.data()),
                     0
@@ -544,7 +786,10 @@
                 const sisaMedia =
                     totalPolybag - totalPemakaian;
 
+                // ----------------------------------
                 // BENIH DAN DISTRIBUSI
+                // ----------------------------------
+
                 const totalBenih = snapTabur.docs.reduce(
                     (a, x) => a + jumlah(x.data()),
                     0
@@ -558,31 +803,32 @@
                 const totalStok =
                     totalSapih + totalCabutan - totalDist;
 
-                // OPNAME TERBARU PER SUMBER DAN BATCH
+                // ----------------------------------
+                // OPNAME TERBARU
+                // Per sumber + batch + jenis
+                // ----------------------------------
+
                 const opnameTerbaru = {};
 
-                snapOpname.forEach(x => {
-                    const d = x.data();
-                    const batch = d.batch || "";
+                snapOpname.forEach(doc => {
+                    const d = doc.data();
+
+                    const batch = normalBatch(d.batch);
                     const sumber = sumberOpname(d);
+                    const jenis = normalJenis(d.jenis);
 
-                    if (!batch || sumber === "Belum tercatat") {
-                        return;
-                    }
+                    if (!batch || !sumber || !jenis) return;
+                    if (!jumlahValid(d.jumlah)) return;
 
-                    const k = kunci(sumber, batch);
-
-                    const dt =
-                        tanggalValid(d.timestamp) ||
-                        tanggalValid(d.tanggal) ||
-                        new Date(0);
+                    const key = kunci(sumber, batch, jenis);
+                    const dt = tanggalDokumen(d) || new Date(0);
 
                     if (
-                        !opnameTerbaru[k] ||
-                        dt > opnameTerbaru[k].tanggal
+                        !opnameTerbaru[key] ||
+                        dt > opnameTerbaru[key].tanggal
                     ) {
-                        opnameTerbaru[k] = {
-                            jumlah: jumlah(d),
+                        opnameTerbaru[key] = {
+                            jumlah: Number(d.jumlah),
                             tanggal: dt
                         };
                     }
@@ -594,7 +840,10 @@
                         0
                     );
 
-                // ISI KARTU DASHBOARD
+                // ----------------------------------
+                // TAMPILKAN KARTU DASHBOARD
+                // ----------------------------------
+
                 document.getElementById("stat-tanah").textContent =
                     `${totalTanah.toFixed(1)} m³`;
 
@@ -657,12 +906,18 @@
                 document.getElementById("stat-distribusi").textContent =
                     `${formatAngka(totalDist)} Bibit`;
 
-                // INFORMASI PEMBARUAN
+                // ----------------------------------
+                // STATUS PEMBARUAN
+                // ----------------------------------
+
                 status.textContent =
                     "Data berhasil diperbarui: " +
                     new Date().toLocaleString("id-ID");
 
-                // GRAFIK 12 BULAN
+                // ----------------------------------
+                // GRAFIK
+                // ----------------------------------
+
                 gambarGrafik(
                     snapTabur,
                     snapSapih,
@@ -670,7 +925,10 @@
                     snapDist
                 );
 
+                // ----------------------------------
                 // ANOMALI
+                // ----------------------------------
+
                 tampilkanAnomali({
                     snapTabur,
                     snapSapih,
@@ -689,9 +947,13 @@
                 status.textContent =
                     "Gagal memperbarui data dashboard.";
 
-                document.getElementById("daftar-anomali").textContent =
-                    "Data dashboard gagal dimuat. Periksa koneksi internet " +
-                    "dan aturan akses Firebase Firestore.";
+                const daftar =
+                    document.getElementById("daftar-anomali");
+
+                if (daftar) {
+                    daftar.textContent =
+                        "Data dashboard gagal dimuat. Periksa koneksi internet dan aturan akses Firebase Firestore.";
+                }
             }
         }
 
