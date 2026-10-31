@@ -16,20 +16,56 @@
             getDocs
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // Memastikan pengguna sudah login
         if (!(await requireAuth())) {
             throw new Error("Login diperlukan.");
         }
 
-        // Menyimpan informasi stok berdasarkan sumber, batch, dan ukuran
+        // Peta stok tersedia berdasarkan sumber, batch, dan ukuran.
         let petaStok = {};
+        let informasiStok = {};
 
-        // Fungsi memuat data stok dan riwayat distribusi
+        const labelUkuran = (ukuran) =>
+            ukuran || "Belum dicatat";
+
+        const buatKey = (sumber, batch, ukuran) =>
+            JSON.stringify([sumber, batch, ukuran]);
+
+        function buatSel(tr, nilai, className = "") {
+            const td = document.createElement("td");
+            td.className = "p-3 " + className;
+            td.textContent = nilai ?? "-";
+            tr.appendChild(td);
+            return td;
+        }
+
+        function formatJumlah(nilai) {
+            return Number(nilai || 0).toLocaleString("id-ID");
+        }
+
+        function tampilkanStokPilihan() {
+            const pilihan = document.getElementById("d-batch").value;
+            const info = document.getElementById("stok-info");
+
+            if (!pilihan || !informasiStok[pilihan]) {
+                info.textContent =
+                    "Pilih batch untuk melihat stok yang tersedia.";
+                return;
+            }
+
+            const d = informasiStok[pilihan];
+
+            info.textContent =
+                `Jenis: ${d.jenis} | ` +
+                `Ukuran: ${d.ukuran} | ` +
+                `Stok tersedia: ${formatJumlah(d.stok)} bibit`;
+        }
+
         async function loadDataAwal() {
             const select = document.getElementById("d-batch");
             const tbody = document.getElementById("tabel-data");
 
-            select.innerHTML = '<option value="">Memuat data stok...</option>';
+            select.innerHTML =
+                '<option value="">Memuat data stok...</option>';
 
             try {
                 const [
@@ -45,227 +81,417 @@
                 ]);
 
                 petaStok = {};
+                informasiStok = {};
 
-                // Menghubungkan kode batch tabur dengan jenis tanaman
                 const jenisPerBatch = {};
 
-                snapTabur.forEach(doc => {
-                    const d = doc.data();
-                    jenisPerBatch[d.kode] = d.jenis;
+                // Menghubungkan kode batch tabur dengan jenis tanaman.
+                snapTabur.forEach((item) => {
+                    const d = item.data();
+
+                    if (d.kode) {
+                        jenisPerBatch[d.kode] =
+                            d.jenis || "Tidak diketahui";
+                    }
                 });
 
-                const labelUkuran = ukuran => ukuran || "Belum dicatat";
-
-                // Menambahkan stok berdasarkan sumber bibit
-                const tambahStok = (sumber, batch, ukuran, jenis, jumlah) => {
+                // Menggabungkan stok berdasarkan sumber, batch, ukuran.
+                function tambahStok(
+                    sumber,
+                    batch,
+                    ukuran,
+                    jenis,
+                    jumlah,
+                    lokasi = ""
+                ) {
                     if (!batch) return;
 
+                    const sumberFinal = sumber || "Media tabur";
                     const ukuranFinal = labelUkuran(ukuran);
-                    const key = `${sumber}|${batch}|${ukuranFinal}`;
+                    const jenisFinal =
+                        jenis ||
+                        jenisPerBatch[batch] ||
+                        "Tidak diketahui";
 
-                    petaStok[key] = (petaStok[key] || 0) + Number(jumlah || 0);
-
-                    let option = Array.from(select.options).find(
-                        opt => opt.value === key
+                    const key = buatKey(
+                        sumberFinal,
+                        batch,
+                        ukuranFinal
                     );
 
-                    if (!option) {
-                        option = document.createElement("option");
-                        option.value = key;
-                        select.appendChild(option);
+                    if (!informasiStok[key]) {
+                        informasiStok[key] = {
+                            sumber: sumberFinal,
+                            batch,
+                            ukuran: ukuranFinal,
+                            jenis: jenisFinal,
+                            lokasi: lokasi || "",
+                            masuk: 0,
+                            keluar: 0,
+                            stok: 0
+                        };
                     }
 
-                    option.textContent =
-                        `${sumber} - ${batch} - ${jenis || "Jenis tidak tercatat"} - ${ukuranFinal}`;
-                };
+                    informasiStok[key].masuk +=
+                        Number(jumlah || 0);
 
-                // Stok bibit hasil penyapihan
-                snapSapih.forEach(doc => {
-                    const d = doc.data();
+                    if (jenis) {
+                        informasiStok[key].jenis = jenis;
+                    }
+
+                    if (lokasi) {
+                        informasiStok[key].lokasi = lokasi;
+                    }
+                }
+
+                // Stok bibit hasil penyapihan.
+                snapSapih.forEach((item) => {
+                    const d = item.data();
 
                     tambahStok(
                         "Media tabur",
                         d.batch,
                         d.ukuran,
                         d.jenis || jenisPerBatch[d.batch],
-                        d.jumlah
+                        d.jumlah,
+                        d.lokasi
                     );
                 });
 
-                // Stok bibit hasil cabutan
-                snapCabutan.forEach(doc => {
-                    const d = doc.data();
+                // Stok bibit hasil cabutan.
+                snapCabutan.forEach((item) => {
+                    const d = item.data();
 
                     tambahStok(
                         "Cabutan",
                         d.batch,
                         d.ukuran,
                         d.jenis,
-                        d.jumlah
+                        d.jumlah,
+                        d.lokasi
                     );
                 });
 
-                // Mengurangi stok berdasarkan distribusi sebelumnya
-                snapDist.forEach(doc => {
-                    const d = doc.data();
+                // Menghitung jumlah distribusi yang sudah tercatat.
+                let totalDistribusi = 0;
+
+                snapDist.forEach((item) => {
+                    const d = item.data();
 
                     const sumber = d.sumber || "Media tabur";
+                    const batch = d.batch;
                     const ukuran = labelUkuran(d.ukuran);
-                    const key = `${sumber}|${d.batch}|${ukuran}`;
+                    const jumlah = Number(d.jumlah || 0);
 
-                    if (petaStok[key] !== undefined) {
-                        petaStok[key] -= Number(d.jumlah || 0);
-                    }
-                });
+                    totalDistribusi += jumlah;
 
-                // Memperbarui pilihan batch beserta stok tersisa
-                Array.from(select.options).forEach(option => {
-                    if (!option.value) return;
+                    if (!batch) return;
 
-                    const [sumber, batch, ukuran] = option.value.split("|");
-                    const key = `${sumber}|${batch}|${ukuran}`;
-
-                    const stok = Math.max(0, petaStok[key] || 0);
-
-                    const label = option.textContent.replace(
-                        / \(Stok tersedia:.*\)$/,
-                        ""
+                    const key = buatKey(
+                        sumber,
+                        batch,
+                        ukuran
                     );
 
-                    option.textContent =
-                        `${label} (Stok tersedia: ${stok})`;
-
-                    // Batch tanpa stok tidak dapat dipilih
-                    if (stok <= 0) {
-                        option.disabled = true;
+                    // Jika data distribusi lama tidak memiliki
+                    // pasangan stok, buat catatan agar anomali terlihat.
+                    if (!informasiStok[key]) {
+                        informasiStok[key] = {
+                            sumber,
+                            batch,
+                            ukuran,
+                            jenis:
+                                d.jenis ||
+                                jenisPerBatch[batch] ||
+                                "Tidak diketahui",
+                            lokasi: "",
+                            masuk: 0,
+                            keluar: 0,
+                            stok: 0
+                        };
                     }
+
+                    informasiStok[key].keluar += jumlah;
                 });
 
-                // Jika belum ada batch
-                if (select.options.length === 1) {
-                    select.innerHTML =
-                        '<option value="">Belum ada stok bibit tersedia</option>';
-                } else {
-                    select.options[0].textContent = "-- Pilih Batch --";
-                }
+                // Menghitung stok tersedia.
+                let totalStokTersedia = 0;
+                let jumlahBatchTersedia = 0;
 
-                // Menampilkan riwayat distribusi
+                Object.entries(informasiStok).forEach(
+                    ([key, d]) => {
+                        d.stok = d.masuk - d.keluar;
+
+                        petaStok[key] = d.stok;
+
+                        if (d.stok > 0) {
+                            totalStokTersedia += d.stok;
+                            jumlahBatchTersedia++;
+                        }
+                    }
+                );
+
+                // Memperbarui ringkasan.
+                document.getElementById("total-tersedia")
+                    .textContent =
+                    formatJumlah(totalStokTersedia) + " Bibit";
+
+                document.getElementById("total-distribusi")
+                    .textContent =
+                    formatJumlah(totalDistribusi) + " Bibit";
+
+                document.getElementById("jumlah-batch")
+                    .textContent =
+                    formatJumlah(jumlahBatchTersedia) + " Pilihan";
+
+                // Membuat ulang pilihan batch.
+                select.innerHTML = "";
+
+                const pilihanAwal = document.createElement("option");
+                pilihanAwal.value = "";
+                pilihanAwal.textContent = "-- Pilih Batch --";
+                select.appendChild(pilihanAwal);
+
+                const daftar = Object.entries(informasiStok)
+                    .sort((a, b) => {
+                        const sumberBanding =
+                            a[1].sumber.localeCompare(b[1].sumber);
+
+                        if (sumberBanding !== 0) {
+                            return sumberBanding;
+                        }
+
+                        return a[1].batch.localeCompare(b[1].batch);
+                    });
+
+                daftar.forEach(([key, d]) => {
+                    const option = document.createElement("option");
+
+                    option.value = key;
+
+                    option.textContent =
+                        `${d.sumber} - ${d.batch} - ` +
+                        `${d.jenis} - ${d.ukuran} ` +
+                        `(Stok tersedia: ${formatJumlah(Math.max(0, d.stok))})`;
+
+                    if (d.stok <= 0) {
+                        option.disabled = true;
+                    }
+
+                    select.appendChild(option);
+                });
+
+                tampilkanStokPilihan();
+
+                // Menampilkan riwayat distribusi.
                 tbody.innerHTML = "";
 
                 if (snapDist.empty) {
-                    tbody.innerHTML = `
-                        <tr>
-                            <td colspan="8" class="p-4 text-center text-slate-400">
-                                Belum ada riwayat distribusi bibit.
-                            </td>
-                        </tr>
-                    `;
-                    return;
+                    const tr = document.createElement("tr");
+
+                    buatSel(
+                        tr,
+                        "Belum ada riwayat distribusi bibit.",
+                        "text-center text-slate-400"
+                    ).colSpan = 8;
+
+                    tbody.appendChild(tr);
+                } else {
+                    const riwayat = snapDist.docs.slice().sort(
+                        (a, b) => {
+                            const waktuA =
+                                a.data().timestamp?.toMillis?.() || 0;
+
+                            const waktuB =
+                                b.data().timestamp?.toMillis?.() || 0;
+
+                            return waktuB - waktuA;
+                        }
+                    );
+
+                    riwayat.forEach((item, index) => {
+                        const d = item.data();
+                        const tr = document.createElement("tr");
+
+                        tr.className = "border-b hover:bg-emerald-50";
+
+                        buatSel(tr, index + 1);
+                        buatSel(tr, d.tanggal || "-");
+                        buatSel(tr, d.sumber || "Media tabur");
+                        buatSel(tr, d.batch || "-", "font-medium");
+                        buatSel(
+                            tr,
+                            d.ukuran || "Belum dicatat"
+                        );
+                        buatSel(
+                            tr,
+                            formatJumlah(d.jumlah) + " Bibit",
+                            "font-semibold text-blue-700"
+                        );
+                        buatSel(tr, d.tujuan || "-");
+                        buatSel(tr, d.sopir || "-");
+
+                        tbody.appendChild(tr);
+                    });
                 }
 
-                let no = 1;
-
-                snapDist.forEach(doc => {
-                    const d = doc.data();
-
-                    tbody.innerHTML += `
-                        <tr class="border-b">
-                            <td class="p-3">${no++}</td>
-                            <td class="p-3">${d.tanggal || "-"}</td>
-                            <td class="p-3">${d.sumber || "Media tabur"}</td>
-                            <td class="p-3 font-medium">${d.batch || "-"}</td>
-                            <td class="p-3">${d.ukuran || "Belum dicatat"}</td>
-                            <td class="p-3 font-semibold text-blue-700">
-                                ${d.jumlah ?? 0} Bibit
-                            </td>
-                            <td class="p-3">${d.tujuan || "-"}</td>
-                            <td class="p-3">${d.sopir || "-"}</td>
-                        </tr>
-                    `;
-                });
+                return true;
 
             } catch (error) {
-                console.error("Gagal memuat data distribusi:", error);
+                console.error(
+                    "Gagal memuat data distribusi:",
+                    error
+                );
 
                 select.innerHTML =
                     '<option value="">Gagal memuat stok bibit</option>';
 
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="8" class="p-4 text-center text-red-600">
-                            Gagal memuat data. Periksa koneksi dan akses Firestore.
-                        </td>
-                    </tr>
-                `;
+                tbody.innerHTML = "";
+
+                const tr = document.createElement("tr");
+
+                buatSel(
+                    tr,
+                    "Gagal memuat data: " + error.message,
+                    "text-center text-red-600"
+                ).colSpan = 8;
+
+                tbody.appendChild(tr);
+
+                return false;
             }
         }
 
-        // Fungsi menyimpan data distribusi
+        // Menampilkan stok ketika batch dipilih.
+        document.getElementById("d-batch")
+            .addEventListener("change", tampilkanStokPilihan);
+
+        // Menyimpan data distribusi.
         window.simpanData = async function(e) {
             e.preventDefault();
 
-            const pilihan = document.getElementById("d-batch").value;
+            const form = document.getElementById("form-distribusi");
+            const tombol = document.getElementById("tombol-simpan");
+
+            const pilihan =
+                document.getElementById("d-batch").value;
 
             if (!pilihan) {
                 alert("Silakan pilih batch bibit terlebih dahulu.");
                 return;
             }
 
-            const [sumber, batch, ukuran] = pilihan.split("|");
-
             const jumlahKeluar = Number(
                 document.getElementById("d-jumlah").value
             );
 
-            const stokTersedia = Math.max(
-                0,
-                petaStok[pilihan] || 0
-            );
+            const tanggal =
+                document.getElementById("d-tanggal").value;
 
-            const tanggal = document.getElementById("d-tanggal").value;
-            const tujuan = document.getElementById("d-tujuan").value.trim();
-            const sopir = document.getElementById("d-sopir").value.trim();
+            const tujuan =
+                document.getElementById("d-tujuan").value.trim();
+
+            const sopir =
+                document.getElementById("d-sopir").value.trim();
 
             if (!tanggal || !tujuan) {
-                alert("Mohon isi tanggal pengiriman dan tujuan distribusi.");
-                return;
-            }
-
-            if (!Number.isInteger(jumlahKeluar) || jumlahKeluar <= 0) {
-                alert("Jumlah distribusi harus berupa bilangan bulat lebih dari 0.");
-                return;
-            }
-
-            if (jumlahKeluar > stokTersedia) {
                 alert(
-                    `Jumlah distribusi (${jumlahKeluar}) melebihi stok tersedia (${stokTersedia}) pada batch dan ukuran ini.`
+                    "Mohon isi tanggal pengiriman dan tujuan distribusi."
                 );
                 return;
             }
 
+            if (
+                !Number.isInteger(jumlahKeluar) ||
+                jumlahKeluar <= 0
+            ) {
+                alert(
+                    "Jumlah distribusi harus berupa bilangan bulat lebih dari 0."
+                );
+                return;
+            }
+
+            tombol.disabled = true;
+            tombol.textContent = "Memeriksa stok...";
+
             try {
-                await addDoc(collection(db, "distribusi_das"), {
-                    tanggal: tanggal,
-                    sumber: sumber,
-                    batch: batch,
-                    ukuran: ukuran,
-                    jumlah: jumlahKeluar,
-                    tujuan: tujuan,
-                    sopir: sopir,
-                    timestamp: new Date()
-                });
+                // Memuat ulang data sebelum menyimpan untuk
+                // mengurangi risiko menggunakan stok yang sudah lama.
+                const berhasilMuat = await loadDataAwal();
 
-                alert("Distribusi berhasil disimpan ke Cloud!");
+                if (!berhasilMuat) {
+                    throw new Error(
+                        "Data stok terbaru gagal dimuat. Silakan coba lagi."
+                    );
+                }
 
-                window.location.href = "index.html";
+                const dataStok = informasiStok[pilihan];
+
+                if (!dataStok) {
+                    throw new Error(
+                        "Batch yang dipilih tidak ditemukan. " +
+                        "Silakan pilih ulang batch."
+                    );
+                }
+
+                const stokTersedia = Math.max(
+                    0,
+                    dataStok.stok
+                );
+
+                if (jumlahKeluar > stokTersedia) {
+                    alert(
+                        `Jumlah distribusi (${formatJumlah(jumlahKeluar)}) ` +
+                        `melebihi stok tersedia (${formatJumlah(stokTersedia)}) ` +
+                        `pada batch dan ukuran ini.`
+                    );
+
+                    return;
+                }
+
+                tombol.textContent = "Menyimpan...";
+
+                await addDoc(
+                    collection(db, "distribusi_das"),
+                    {
+                        tanggal,
+                        sumber: dataStok.sumber,
+                        batch: dataStok.batch,
+                        jenis: dataStok.jenis,
+                        ukuran: dataStok.ukuran,
+                        jumlah: jumlahKeluar,
+                        tujuan,
+                        sopir,
+                        timestamp: new Date()
+                    }
+                );
+
+                alert("Distribusi berhasil disimpan.");
+
+                // Form direset tanpa berpindah halaman.
+                form.reset();
+
+                // Memuat ulang ringkasan, pilihan batch,
+                // dan riwayat distribusi.
+                await loadDataAwal();
 
             } catch (error) {
-                console.error("Gagal menyimpan distribusi:", error);
-                alert("Gagal menyimpan distribusi: " + error.message);
+                console.error(
+                    "Gagal menyimpan distribusi:",
+                    error
+                );
+
+                alert(
+                    "Gagal menyimpan distribusi: " + error.message
+                );
+
+            } finally {
+                tombol.disabled = false;
+                tombol.textContent = "Simpan Distribusi";
             }
         };
 
-        // Memuat data setelah proses autentikasi selesai
+        // Memuat data pertama kali setelah autentikasi.
         await loadDataAwal();
     </script>
 </head>
@@ -278,25 +504,69 @@
                 🌱 SIP - Distribusi Bibit (DAS)
             </h1>
 
-            <a href="index.html" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">
+            <a href="index.html"
+               class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">
                 Kembali
             </a>
         </div>
     </header>
 
-    <main class="max-w-4xl mx-auto px-4 py-8 space-y-8">
+    <main class="max-w-7xl mx-auto px-4 py-8 space-y-8">
 
-        <div class="bg-white p-6 rounded-2xl shadow">
+        <!-- Ringkasan distribusi -->
+        <section class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+            <div class="bg-white p-5 rounded-xl shadow border-l-4 border-emerald-600">
+                <p class="text-sm text-slate-500">
+                    Total Stok Tersedia
+                </p>
+
+                <p id="total-tersedia"
+                   class="text-2xl font-bold text-emerald-800 mt-1">
+                    Memuat...
+                </p>
+            </div>
+
+            <div class="bg-white p-5 rounded-xl shadow border-l-4 border-blue-500">
+                <p class="text-sm text-slate-500">
+                    Total Distribusi Tercatat
+                </p>
+
+                <p id="total-distribusi"
+                   class="text-2xl font-bold text-blue-800 mt-1">
+                    Memuat...
+                </p>
+            </div>
+
+            <div class="bg-white p-5 rounded-xl shadow border-l-4 border-amber-500">
+                <p class="text-sm text-slate-500">
+                    Batch dengan Stok Tersedia
+                </p>
+
+                <p id="jumlah-batch"
+                   class="text-2xl font-bold text-amber-800 mt-1">
+                    Memuat...
+                </p>
+            </div>
+
+        </section>
+
+        <!-- Form distribusi -->
+        <section class="bg-white p-6 rounded-2xl shadow">
+
             <h2 class="text-xl font-bold text-emerald-900 mb-4">
                 Formulir Pengiriman / Surat Jalan
             </h2>
 
-            <form onsubmit="simpanData(event)" class="space-y-4">
+            <form id="form-distribusi"
+                  onsubmit="simpanData(event)"
+                  class="space-y-4">
 
                 <div>
                     <label class="block text-sm font-medium">
                         Tanggal Pengiriman
                     </label>
+
                     <input
                         type="date"
                         id="d-tanggal"
@@ -309,19 +579,28 @@
                     <label class="block text-sm font-medium">
                         Pilih Batch Bibit
                     </label>
+
                     <select
                         id="d-batch"
                         required
                         class="w-full mt-1 p-3 border rounded-xl"
                     >
-                        <option value="">Memuat data stok...</option>
+                        <option value="">
+                            Memuat data stok...
+                        </option>
                     </select>
+
+                    <p id="stok-info"
+                       class="mt-2 text-sm text-emerald-700">
+                        Pilih batch untuk melihat stok yang tersedia.
+                    </p>
                 </div>
 
                 <div>
                     <label class="block text-sm font-medium">
                         Jumlah Bibit Keluar
                     </label>
+
                     <input
                         type="number"
                         id="d-jumlah"
@@ -337,6 +616,7 @@
                     <label class="block text-sm font-medium">
                         Proyek / Tujuan Rehab DAS
                     </label>
+
                     <input
                         type="text"
                         id="d-tujuan"
@@ -350,6 +630,7 @@
                     <label class="block text-sm font-medium">
                         Nama Sopir & No. Plat
                     </label>
+
                     <input
                         type="text"
                         id="d-sopir"
@@ -360,15 +641,18 @@
 
                 <button
                     type="submit"
-                    class="w-full bg-emerald-700 text-white p-3 rounded-xl font-medium cursor-pointer"
+                    id="tombol-simpan"
+                    class="w-full bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium cursor-pointer disabled:opacity-50"
                 >
-                    Simpan ke Cloud
+                    Simpan Distribusi
                 </button>
 
             </form>
-        </div>
+        </section>
 
-        <div class="bg-white p-6 rounded-2xl shadow">
+        <!-- Riwayat distribusi -->
+        <section class="bg-white p-6 rounded-2xl shadow">
+
             <h3 class="text-lg font-bold text-emerald-900 mb-4">
                 Riwayat Distribusi Bibit Keluar (DAS)
             </h3>
@@ -391,7 +675,8 @@
 
                     <tbody id="tabel-data">
                         <tr>
-                            <td colspan="8" class="p-4 text-center text-slate-400">
+                            <td colspan="8"
+                                class="p-4 text-center text-slate-400">
                                 Memuat data...
                             </td>
                         </tr>
@@ -399,7 +684,7 @@
 
                 </table>
             </div>
-        </div>
+        </section>
 
     </main>
 
