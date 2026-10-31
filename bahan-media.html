@@ -9,212 +9,366 @@
 
     <script type="module">
         import { db, requireAuth } from "./firebase.js";
-
         import {
-            collection,
-            addDoc,
-            getDocs,
-            query,
-            orderBy
+            collection, addDoc, getDocs, query, orderBy,
+            doc, updateDoc
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // Memastikan pengguna sudah login
-        if (!(await requireAuth())) {
-            throw new Error("Login diperlukan.");
+        if (!(await requireAuth())) throw new Error("Login diperlukan.");
+
+        const koleksiMasuk = collection(db, "bahan_media");
+        const koleksiPakai = collection(db, "pemakaian_bahan_media");
+
+        let dataMasuk = [];
+        let dataPakai = [];
+        let idEdit = null;
+
+        const jenisBahan = [
+            "Tanah Topsoil",
+            "Pupuk Organik / Kompos"
+        ];
+
+        const rupiahVolume = v =>
+            Number(v || 0).toLocaleString("id-ID", {
+                maximumFractionDigits: 2
+            });
+
+        const aman = value => String(value ?? "").replace(/[&<>"']/g, c => ({
+            "&": "&amp;", "<": "&lt;", ">": "&gt;",
+            '"': "&quot;", "'": "&#39;"
+        }[c]));
+
+        function tanggalHariIni() {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
         }
 
-        // Fungsi menyimpan data bahan media
+        function totalMasuk(jenis) {
+            return dataMasuk
+                .filter(d => d.jenis === jenis)
+                .reduce((s,d) => s + Number(d.volume || 0), 0);
+        }
+
+        function totalPakai(jenis, kecualiId = null) {
+            return dataPakai
+                .filter(d => d.jenis === jenis && d.id !== kecualiId)
+                .reduce((s,d) => s + Number(d.volume || 0), 0);
+        }
+
+        function sisaStok(jenis, kecualiId = null) {
+            return totalMasuk(jenis) - totalPakai(jenis, kecualiId);
+        }
+
+        async function muatData() {
+            const [masuk, pakai] = await Promise.all([
+                getDocs(query(koleksiMasuk, orderBy("tanggal", "desc"))),
+                getDocs(query(koleksiPakai, orderBy("tanggal", "desc")))
+            ]);
+
+            dataMasuk = masuk.docs.map(x => ({ id: x.id, ...x.data() }));
+            dataPakai = pakai.docs.map(x => ({ id: x.id, ...x.data() }));
+
+            tampilkanSemua();
+        }
+
+        function tampilkanRingkasan() {
+            const topsoilMasuk = totalMasuk(jenisBahan[0]);
+            const komposMasuk = totalMasuk(jenisBahan[1]);
+            const topsoilPakai = totalPakai(jenisBahan[0]);
+            const komposPakai = totalPakai(jenisBahan[1]);
+
+            document.getElementById("ringkasan").innerHTML = `
+                <div class="bg-white rounded-xl shadow p-4">
+                    <p class="text-sm text-slate-500">Sisa Topsoil</p>
+                    <p class="text-2xl font-bold text-emerald-700">${rupiahVolume(sisaStok(jenisBahan[0]))} m³</p>
+                    <p class="text-xs text-slate-500">Masuk ${rupiahVolume(topsoilMasuk)} · Dipakai ${rupiahVolume(topsoilPakai)}</p>
+                </div>
+                <div class="bg-white rounded-xl shadow p-4">
+                    <p class="text-sm text-slate-500">Sisa Pupuk Organik / Kompos</p>
+                    <p class="text-2xl font-bold text-emerald-700">${rupiahVolume(sisaStok(jenisBahan[1]))} m³</p>
+                    <p class="text-xs text-slate-500">Masuk ${rupiahVolume(komposMasuk)} · Dipakai ${rupiahVolume(komposPakai)}</p>
+                </div>
+                <div class="bg-white rounded-xl shadow p-4">
+                    <p class="text-sm text-slate-500">Total Sisa Bahan Media</p>
+                    <p class="text-2xl font-bold text-blue-700">${rupiahVolume(sisaStok(jenisBahan[0]) + sisaStok(jenisBahan[1]))} m³</p>
+                    <p class="text-xs text-slate-500">Gabungan kedua jenis bahan</p>
+                </div>
+            `;
+        }
+
+        function tampilkanMasuk() {
+            const tbody = document.getElementById("tabel-data");
+            tbody.innerHTML = "";
+
+            if (!dataMasuk.length) {
+                tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-slate-400">Belum ada riwayat stok masuk.</td></tr>`;
+                return;
+            }
+
+            dataMasuk.forEach((d,i) => {
+                const tr = document.createElement("tr");
+                tr.className = "border-b";
+                tr.innerHTML = `
+                    <td class="p-3">${i+1}</td>
+                    <td class="p-3">${aman(d.tanggal || "-")}</td>
+                    <td class="p-3">${aman(d.jenis || "-")}</td>
+                    <td class="p-3 font-semibold text-emerald-700">${rupiahVolume(d.volume)} m³</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function tampilkanPakai() {
+            const tbody = document.getElementById("tabel-pemakaian");
+            tbody.innerHTML = "";
+
+            if (!dataPakai.length) {
+                tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-slate-400">Belum ada riwayat pemakaian.</td></tr>`;
+                return;
+            }
+
+            dataPakai.forEach((d,i) => {
+                const tr = document.createElement("tr");
+                tr.className = "border-b";
+                tr.innerHTML = `
+                    <td class="p-3">${i+1}</td>
+                    <td class="p-3">${aman(d.tanggal || "-")}</td>
+                    <td class="p-3">${aman(d.jenis || "-")}</td>
+                    <td class="p-3 font-semibold text-orange-700">${rupiahVolume(d.volume)} m³</td>
+                    <td class="p-3">
+                        <button class="text-blue-700 font-semibold mr-2" data-edit="${aman(d.id)}">Edit</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            tbody.querySelectorAll("[data-edit]").forEach(btn => {
+                btn.addEventListener("click", () => mulaiEdit(btn.dataset.edit));
+            });
+        }
+
+        function tampilkanSemua() {
+            tampilkanRingkasan();
+            tampilkanMasuk();
+            tampilkanPakai();
+            perbaruiInfoStok();
+        }
+
+        function perbaruiInfoStok() {
+            const jenis = document.getElementById("pakai-jenis").value;
+            const sisa = sisaStok(jenis, idEdit);
+            document.getElementById("info-stok").textContent =
+                `Stok tersedia: ${rupiahVolume(sisa)} m³`;
+            document.getElementById("pakai-volume").max = Math.max(0, sisa);
+        }
+
         window.simpanData = async function(e) {
             e.preventDefault();
 
             const tanggal = document.getElementById("bm-tanggal").value;
             const jenis = document.getElementById("bm-jenis").value;
-            const volume = parseFloat(document.getElementById("bm-volume").value);
+            const volume = Number(document.getElementById("bm-volume").value);
 
-            if (!tanggal || !jenis || !Number.isFinite(volume) || volume <= 0) {
-                alert("Mohon isi tanggal, jenis bahan, dan volume dengan benar.");
+            if (!tanggal || !jenisBahan.includes(jenis) || !Number.isFinite(volume) || volume <= 0) {
+                alert("Mohon isi data stok masuk dengan benar.");
                 return;
             }
 
             try {
-                await addDoc(collection(db, "bahan_media"), {
-                    tanggal: tanggal,
-                    jenis: jenis,
-                    volume: volume,
-                    timestamp: new Date()
+                await addDoc(koleksiMasuk, {
+                    tanggal, jenis, volume, timestamp: new Date()
                 });
-
-                alert("Data bahan media berhasil disimpan!");
-
-                window.location.href = "index.html";
-
-            } catch (error) {
-                console.error("Gagal menyimpan data:", error);
-                alert("Gagal menyimpan data: " + error.message);
+                alert("Stok masuk berhasil disimpan.");
+                e.target.reset();
+                document.getElementById("bm-tanggal").value = tanggalHariIni();
+                await muatData();
+            } catch(error) {
+                console.error(error);
+                alert("Gagal menyimpan: " + error.message);
             }
         };
 
-        // Fungsi menampilkan riwayat bahan media
-        async function muatTabel() {
-            const tbody = document.getElementById("tabel-data");
+        window.simpanPemakaian = async function(e) {
+            e.preventDefault();
+
+            const tanggal = document.getElementById("pakai-tanggal").value;
+            const jenis = document.getElementById("pakai-jenis").value;
+            const volume = Number(document.getElementById("pakai-volume").value);
+
+            if (!tanggal || !jenisBahan.includes(jenis) || !Number.isFinite(volume) || volume <= 0) {
+                alert("Mohon isi tanggal, jenis bahan, dan volume pemakaian dengan benar.");
+                return;
+            }
 
             try {
-                const q = query(
-                    collection(db, "bahan_media"),
-                    orderBy("tanggal", "desc")
-                );
+                // Muat ulang untuk memeriksa stok terbaru sebelum menyimpan.
+                const snap = await getDocs(koleksiPakai);
+                dataPakai = snap.docs.map(x => ({ id: x.id, ...x.data() }));
 
-                const querySnapshot = await getDocs(q);
-
-                tbody.innerHTML = "";
-
-                if (querySnapshot.empty) {
-                    tbody.innerHTML = `
-                        <tr>
-                            <td colspan="4" class="p-4 text-center text-slate-400">
-                                Belum ada riwayat bahan media.
-                            </td>
-                        </tr>
-                    `;
+                const tersedia = sisaStok(jenis, idEdit);
+                if (volume > tersedia) {
+                    alert(`Pemakaian melebihi stok tersedia. Stok: ${rupiahVolume(tersedia)} m³.`);
                     return;
                 }
 
-                let no = 1;
+                const payload = {
+                    tanggal, jenis, volume,
+                    timestamp: new Date()
+                };
 
-                querySnapshot.forEach((doc) => {
-                    const d = doc.data();
+                if (idEdit) {
+                    await updateDoc(doc(db, "pemakaian_bahan_media", idEdit), payload);
+                    alert("Pemakaian berhasil diperbarui.");
+                } else {
+                    await addDoc(koleksiPakai, payload);
+                    alert("Pemakaian bahan media berhasil dicatat.");
+                }
 
-                    tbody.innerHTML += `
-                        <tr class="border-b">
-                            <td class="p-3">${no++}</td>
-                            <td class="p-3">${d.tanggal || "-"}</td>
-                            <td class="p-3">${d.jenis || "-"}</td>
-                            <td class="p-3 font-semibold text-emerald-700">
-                                ${d.volume ?? 0} m³
-                            </td>
-                        </tr>
-                    `;
-                });
-
-            } catch (error) {
-                console.error("Gagal memuat tabel:", error);
-
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="4" class="p-4 text-center text-red-600">
-                            Gagal memuat data. Periksa koneksi dan akses Firestore.
-                        </td>
-                    </tr>
-                `;
+                batalEdit();
+                await muatData();
+            } catch(error) {
+                console.error(error);
+                alert("Gagal menyimpan pemakaian: " + error.message);
             }
+        };
+
+        function mulaiEdit(id) {
+            const d = dataPakai.find(x => x.id === id);
+            if (!d) return;
+
+            idEdit = id;
+            document.getElementById("pakai-tanggal").value = d.tanggal || "";
+            document.getElementById("pakai-jenis").value = d.jenis || jenisBahan[0];
+            document.getElementById("pakai-volume").value = d.volume || "";
+            document.getElementById("judul-pakai").textContent = "Edit Pemakaian Bahan Media";
+            document.getElementById("tombol-pakai").textContent = "Simpan Perubahan";
+            document.getElementById("tombol-batal").classList.remove("hidden");
+            perbaruiInfoStok();
+            document.getElementById("form-pakai").scrollIntoView({behavior:"smooth"});
         }
 
-        // Memuat tabel setelah autentikasi selesai
-        await muatTabel();
+        function batalEdit() {
+            idEdit = null;
+            document.getElementById("form-pakai").reset();
+            document.getElementById("pakai-tanggal").value = tanggalHariIni();
+            document.getElementById("judul-pakai").textContent = "Catat Pemakaian Bahan Media";
+            document.getElementById("tombol-pakai").textContent = "Simpan Pemakaian";
+            document.getElementById("tombol-batal").classList.add("hidden");
+            perbaruiInfoStok();
+        }
+
+        window.batalEdit = batalEdit;
+
+        document.getElementById("pakai-jenis").addEventListener("change", perbaruiInfoStok);
+
+        document.getElementById("bm-tanggal").value = tanggalHariIni();
+        document.getElementById("pakai-tanggal").value = tanggalHariIni();
+
+        try {
+            await muatData();
+        } catch(error) {
+            console.error(error);
+            alert("Gagal memuat data bahan media: " + error.message);
+        }
     </script>
 </head>
 
 <body class="bg-emerald-50 text-slate-800 font-sans min-h-screen">
+<header class="bg-emerald-800 text-white shadow-md">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+        <h1 class="text-xl font-bold">🌱 SIP - Stok Bahan Media (m³)</h1>
+        <a href="index.html" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">Kembali</a>
+    </div>
+</header>
 
-    <header class="bg-emerald-800 text-white shadow-md">
-        <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-            <h1 class="text-xl font-bold">🌱 SIP - Stok Bahan Media (m³)</h1>
-            <a href="index.html" class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">
-                Kembali
-            </a>
+<main class="max-w-6xl mx-auto px-4 py-8 space-y-8">
+
+    <section>
+        <h2 class="text-lg font-bold text-emerald-900 mb-3">Ringkasan Stok Bahan Media</h2>
+        <div id="ringkasan" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="bg-white p-4 rounded-xl">Memuat stok...</div>
         </div>
-    </header>
+    </section>
 
-    <main class="max-w-4xl mx-auto px-4 py-8 space-y-8">
-
-        <div class="bg-white p-6 rounded-2xl shadow">
-            <h2 class="text-xl font-bold text-emerald-900 mb-4">
-                Formulir Stok Masuk Bahan Media
-            </h2>
-
-            <form onsubmit="simpanData(event)" class="space-y-4">
-
-                <div>
-                    <label class="block text-sm font-medium">
-                        Tanggal Penerimaan
-                    </label>
-                    <input
-                        type="date"
-                        id="bm-tanggal"
-                        required
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium">
-                        Jenis Bahan Media
-                    </label>
-                    <select
-                        id="bm-jenis"
-                        required
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
-                        <option value="Tanah Topsoil">Tanah Topsoil</option>
-                        <option value="Pupuk Organik / Kompos">Pupuk Organik / Kompos</option>
-                    </select>
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium">
-                        Volume Masuk (m³)
-                    </label>
-                    <input
-                        type="number"
-                        step="0.1"
-                        min="0.1"
-                        id="bm-volume"
-                        required
-                        placeholder="10"
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
-                </div>
-
-                <button
-                    type="submit"
-                    class="w-full bg-emerald-700 text-white p-3 rounded-xl font-medium cursor-pointer"
-                >
-                    Simpan ke Cloud
-                </button>
-
-            </form>
-        </div>
-
-        <div class="bg-white p-6 rounded-2xl shadow">
-            <h3 class="text-lg font-bold text-emerald-900 mb-4">
-                Riwayat Masuk Bahan Media
-            </h3>
-
-            <div class="overflow-x-auto">
-                <table class="w-full text-left border-collapse text-sm">
-
-                    <thead>
-                        <tr class="bg-emerald-100 text-emerald-900">
-                            <th class="p-3">No</th>
-                            <th class="p-3">Tanggal</th>
-                            <th class="p-3">Jenis Bahan</th>
-                            <th class="p-3">Volume</th>
-                        </tr>
-                    </thead>
-
-                    <tbody id="tabel-data">
-                        <tr>
-                            <td colspan="4" class="p-4 text-center text-slate-400">
-                                Memuat data...
-                            </td>
-                        </tr>
-                    </tbody>
-
-                </table>
+    <section class="bg-white p-6 rounded-2xl shadow">
+        <h2 class="text-xl font-bold text-emerald-900 mb-4">Formulir Stok Masuk Bahan Media</h2>
+        <form onsubmit="simpanData(event)" class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium">Tanggal Penerimaan</label>
+                <input type="date" id="bm-tanggal" required class="w-full mt-1 p-3 border rounded-xl">
             </div>
+            <div>
+                <label class="block text-sm font-medium">Jenis Bahan Media</label>
+                <select id="bm-jenis" required class="w-full mt-1 p-3 border rounded-xl">
+                    <option value="Tanah Topsoil">Tanah Topsoil</option>
+                    <option value="Pupuk Organik / Kompos">Pupuk Organik / Kompos</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium">Volume Masuk (m³)</label>
+                <input type="number" step="0.01" min="0.01" id="bm-volume" required placeholder="10" class="w-full mt-1 p-3 border rounded-xl">
+            </div>
+            <button type="submit" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium">Simpan Stok Masuk</button>
+        </form>
+    </section>
+
+    <section class="bg-white p-6 rounded-2xl shadow">
+        <h2 id="judul-pakai" class="text-xl font-bold text-emerald-900 mb-4">Catat Pemakaian Bahan Media</h2>
+        <form id="form-pakai" onsubmit="simpanPemakaian(event)" class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium">Tanggal Pemakaian</label>
+                <input type="date" id="pakai-tanggal" required class="w-full mt-1 p-3 border rounded-xl">
+            </div>
+            <div>
+                <label class="block text-sm font-medium">Jenis Bahan Media</label>
+                <select id="pakai-jenis" required class="w-full mt-1 p-3 border rounded-xl">
+                    <option value="Tanah Topsoil">Tanah Topsoil</option>
+                    <option value="Pupuk Organik / Kompos">Pupuk Organik / Kompos</option>
+                </select>
+            </div>
+            <div id="info-stok" class="bg-emerald-50 text-emerald-800 p-3 rounded-xl text-sm font-semibold">
+                Stok tersedia: memuat...
+            </div>
+            <div>
+                <label class="block text-sm font-medium">Volume yang Sudah Dipakai (m³)</label>
+                <input type="number" step="0.01" min="0.01" id="pakai-volume" required placeholder="Contoh: 2.5" class="w-full mt-1 p-3 border rounded-xl">
+            </div>
+            <div class="flex gap-2">
+                <button id="tombol-pakai" type="submit" class="flex-1 bg-orange-600 hover:bg-orange-700 text-white p-3 rounded-xl font-medium">Simpan Pemakaian</button>
+                <button id="tombol-batal" type="button" onclick="batalEdit()" class="hidden bg-slate-200 px-4 rounded-xl">Batal</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="bg-white p-6 rounded-2xl shadow">
+        <h3 class="text-lg font-bold text-emerald-900 mb-4">Riwayat Stok Masuk</h3>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+                <thead><tr class="bg-emerald-100 text-emerald-900">
+                    <th class="p-3">No</th><th class="p-3">Tanggal</th>
+                    <th class="p-3">Jenis Bahan</th><th class="p-3">Volume Masuk</th>
+                </tr></thead>
+                <tbody id="tabel-data">
+                    <tr><td colspan="4" class="p-4 text-center text-slate-400">Memuat data...</td></tr>
+                </tbody>
+            </table>
         </div>
+    </section>
 
-    </main>
-
+    <section class="bg-white p-6 rounded-2xl shadow">
+        <h3 class="text-lg font-bold text-emerald-900 mb-4">Riwayat Pemakaian Bahan Media</h3>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+                <thead><tr class="bg-orange-100 text-orange-900">
+                    <th class="p-3">No</th><th class="p-3">Tanggal</th>
+                    <th class="p-3">Jenis Bahan</th><th class="p-3">Volume Dipakai</th><th class="p-3">Aksi</th>
+                </tr></thead>
+                <tbody id="tabel-pemakaian">
+                    <tr><td colspan="5" class="p-4 text-center text-slate-400">Memuat data...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+</main>
 </body>
 </html>
