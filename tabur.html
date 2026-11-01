@@ -22,99 +22,6 @@
         const tabelData = document.getElementById("tabel-data");
         const tombolSimpan = document.getElementById("tombol-simpan");
 
-        // Data tabur yang sedang dimuat, dipakai untuk saran dan pemeriksaan.
-        let dataTabur = [];
-
-        const normKode = v => String(v ?? "").trim().toUpperCase();
-
-        const normJenis = v =>
-            String(v ?? "").trim().toLowerCase().replace(/\s+/g, " ");
-
-        // Penulisan yang paling sering dipakai dari sekumpulan teks.
-        function penulisanUmum(daftar) {
-            const hitung = new Map();
-            daftar.forEach(t => hitung.set(t, (hitung.get(t) || 0) + 1));
-            return [...hitung.entries()].sort((a, b) => b[1] - a[1])[0][0];
-        }
-
-        // Menyamakan kode batch dan jenis dengan data yang sudah ada,
-        // menolak jenis yang berbeda untuk batch yang sama, dan
-        // menandai data yang identik dengan data sebelumnya.
-        function periksaBatch(daftar, kode, jenis, tanggal, jumlah) {
-            const sama = daftar.filter(
-                d => d.kode && normKode(d.kode) === normKode(kode)
-            );
-
-            let kodeFinal = kode;
-            let jenisFinal = jenis;
-            let disesuaikan = false;
-
-            if (sama.length) {
-                kodeFinal = penulisanUmum(sama.map(d => String(d.kode).trim()));
-
-                const cocok = sama.filter(
-                    d => normJenis(d.jenis) === normJenis(jenis)
-                );
-
-                if (!cocok.length) {
-                    const ada = [...new Set(
-                        sama.map(d => String(d.jenis || "-").trim())
-                    )].join("; ");
-
-                    return {
-                        ok: false,
-                        pesan:
-                            `Kode batch ${kodeFinal} sudah tercatat dengan jenis: ${ada}.\n\n` +
-                            "Gunakan salah satu penulisan jenis tersebut, " +
-                            "atau pakai kode batch baru untuk jenis yang berbeda."
-                    };
-                }
-
-                jenisFinal = penulisanUmum(cocok.map(d => String(d.jenis).trim()));
-                disesuaikan = kodeFinal !== kode || jenisFinal !== jenis;
-            }
-
-            const duplikat = sama.some(
-                d =>
-                    normJenis(d.jenis) === normJenis(jenis) &&
-                    d.tanggal === tanggal &&
-                    Number(d.jumlah) === jumlah
-            );
-
-            return { ok: true, kode: kodeFinal, jenis: jenisFinal, duplikat, disesuaikan };
-        }
-
-        // Saran kode batch dan jenis dari data yang sudah ada.
-        function isiDaftarSaran() {
-            const isi = (idDatalist, nilai) => {
-                const el = document.getElementById(idDatalist);
-                if (!el) return;
-                el.replaceChildren();
-                [...new Set(nilai.filter(Boolean).map(v => String(v).trim()))]
-                    .sort()
-                    .forEach(v => {
-                        const opt = document.createElement("option");
-                        opt.value = v;
-                        el.appendChild(opt);
-                    });
-            };
-
-            isi("daftar-kode", dataTabur.map(d => d.kode));
-            isi("daftar-jenis", dataTabur.map(d => d.jenis));
-        }
-
-        function tampilkanGalat(pesan) {
-            tabelData.replaceChildren();
-
-            const tr = document.createElement("tr");
-            const td = document.createElement("td");
-            td.colSpan = 5;
-            td.className = "p-4 text-center text-red-600";
-            td.textContent = "Gagal memuat data: " + pesan;
-            tr.appendChild(td);
-            tabelData.appendChild(tr);
-        }
-
         // Memuat riwayat tabur benih
         async function muatTabel() {
             tabelData.innerHTML = `
@@ -129,9 +36,6 @@
                 const querySnapshot = await getDocs(
                     collection(db, "tabur_benih")
                 );
-
-                dataTabur = querySnapshot.docs.map(x => x.data());
-                isiDaftarSaran();
 
                 tabelData.innerHTML = "";
 
@@ -196,7 +100,13 @@
             } catch (error) {
                 console.error("Gagal memuat tabel:", error);
 
-                tampilkanGalat(error.message);
+                tabelData.innerHTML = `
+                    <tr>
+                        <td colspan="5" class="p-4 text-center text-red-600">
+                            Gagal memuat data: ${error.message}
+                        </td>
+                    </tr>
+                `;
             }
         }
 
@@ -223,47 +133,17 @@
 
             try {
                 tombolSimpan.disabled = true;
-                tombolSimpan.textContent = "Memeriksa batch...";
-
-                // Baca ulang data terbaru sebelum menyimpan.
-                const terbaru = await getDocs(collection(db, "tabur_benih"));
-                const periksa = periksaBatch(
-                    terbaru.docs.map(x => x.data()),
-                    kode, jenis, tanggal, jumlah
-                );
-
-                if (!periksa.ok) {
-                    alert(periksa.pesan);
-                    return;
-                }
-
-                if (
-                    periksa.duplikat &&
-                    !confirm(
-                        "Data dengan batch, jenis, tanggal, dan jumlah yang sama " +
-                        "sudah tercatat.\n\nIni mungkin input ganda. Tetap simpan?"
-                    )
-                ) {
-                    return;
-                }
-
                 tombolSimpan.textContent = "Menyimpan...";
 
                 await addDoc(collection(db, "tabur_benih"), {
-                    kode: periksa.kode,
-                    jenis: periksa.jenis,
+                    kode: kode,
+                    jenis: jenis,
                     tanggal: tanggal,
                     jumlah: jumlah,
                     timestamp: new Date()
                 });
 
-                alert(
-                    "Data tabur berhasil disimpan ke Cloud!" +
-                    (periksa.disesuaikan
-                        ? `\n\nPenulisan disesuaikan dengan data yang sudah ada:\n` +
-                          `Kode batch: ${periksa.kode}\nJenis: ${periksa.jenis}`
-                        : "")
-                );
+                alert("Data tabur berhasil disimpan ke Cloud!");
 
                 document.getElementById("form-tabur").reset();
 
@@ -304,9 +184,6 @@
 
             <form id="form-tabur" onsubmit="simpanData(event)" class="space-y-4">
 
-                <datalist id="daftar-kode"></datalist>
-                <datalist id="daftar-jenis"></datalist>
-
                 <div>
                     <label class="block text-sm font-medium">
                         Kode Batch
@@ -314,8 +191,6 @@
                     <input
                         type="text"
                         id="t-kode"
-                        list="daftar-kode"
-                        autocomplete="off"
                         required
                         placeholder="BATCH-PULAI-01"
                         class="w-full mt-1 p-3 border rounded-xl"
@@ -329,8 +204,6 @@
                     <input
                         type="text"
                         id="t-jenis"
-                        list="daftar-jenis"
-                        autocomplete="off"
                         required
                         placeholder="Alstonia spatulata (Pulai)"
                         class="w-full mt-1 p-3 border rounded-xl"
