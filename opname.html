@@ -4,556 +4,371 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stok Bibit & Harga - SIP</title>
+    <title>Opname Fisik - SIP</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 
     <script type="module">
         import { db, requireAuth } from "./firebase.js";
-
         import {
             collection,
+            addDoc,
             getDocs,
-            doc,
-            setDoc
+            query,
+            orderBy
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         if (!(await requireAuth())) {
             throw new Error("Login diperlukan.");
         }
 
-        const PILIHAN_UKURAN = [
-            "10–20 cm",
-            "20–30 cm",
-            "30–50 cm",
-            "50–80 cm",
-            "80–100 cm",
-            "100–150 cm",
-            "Di atas 150 cm"
-        ];
+        const batchSelect = document.getElementById("o-batch");
+        const tabelData = document.getElementById("tabel-data");
+        const formOpname = document.getElementById("form-opname");
+        const tombolSimpan = document.getElementById("tombol-simpan");
 
-        const rupiah = (n) =>
-            new Intl.NumberFormat("id-ID", {
-                style: "currency",
-                currency: "IDR",
-                maximumFractionDigits: 0
-            }).format(n || 0);
+        let daftarBatch = [];
+        let dataOpname = [];
 
-        const normal = (v) =>
-            String(v || "").trim().toLowerCase().replace(/\s+/g, " ");
+        const angka = nilai =>
+            (Number(nilai) || 0).toLocaleString("id-ID");
 
-        const keyHarga = (jenis, ukuran) =>
-            normal(jenis) + "__" + normal(ukuran);
+        // ==========================================
+        // MEMUAT BATCH BERDASARKAN SUMBER DAN UKURAN
+        // ==========================================
 
-        const keyBatch = (sumber, batch) =>
-            normal(sumber) + "|" + normal(batch);
+        async function muatBatch() {
+            const [snapSapih, snapCabutan] = await Promise.all([
+                getDocs(collection(db, "penyapihan")),
+                getDocs(collection(db, "cabutan_bibit"))
+            ]);
 
-        function waktuMillis(timestamp) {
-            if (!timestamp) return 0;
+            const kelompok = new Map();
 
-            if (typeof timestamp.toMillis === "function") {
-                return timestamp.toMillis();
-            }
+            function gabungkanBatch(snapshot, sumber) {
+                snapshot.forEach(docData => {
+                    const d = docData.data();
 
-            if (typeof timestamp.toDate === "function") {
-                return timestamp.toDate().getTime();
-            }
+                    if (!d.batch) return;
 
-            if (timestamp instanceof Date) {
-                return timestamp.getTime();
-            }
-
-            const hasil = new Date(timestamp).getTime();
-            return Number.isFinite(hasil) ? hasil : 0;
-        }
-
-        function buatSel(tr, nilai, className = "") {
-            const td = document.createElement("td");
-            td.className = "p-3 " + className;
-            td.textContent = nilai ?? "-";
-            tr.appendChild(td);
-            return td;
-        }
-
-        async function muatData() {
-            const tbody = document.getElementById("tabel-stok");
-            const tbodyHarga = document.getElementById("tabel-harga");
-
-            try {
-                const [
-                    tabur,
-                    sapih,
-                    cabutan,
-                    distribusi,
-                    harga,
-                    opname
-                ] = await Promise.all([
-                    getDocs(collection(db, "tabur_benih")),
-                    getDocs(collection(db, "penyapihan")),
-                    getDocs(collection(db, "cabutan_bibit")),
-                    getDocs(collection(db, "distribusi_das")),
-                    getDocs(collection(db, "harga_bibit")),
-                    getDocs(collection(db, "opname_fisik"))
-                ]);
-
-                // Pemetaan jenis tanaman berdasarkan batch tabur.
-                const jenisBatch = {};
-
-                tabur.forEach((x) => {
-                    const d = x.data();
-
-                    if (d.kode) {
-                        jenisBatch[d.kode] =
-                            d.jenis || "Tidak diketahui";
-                    }
-                });
-
-                // Pengelompokan stok berdasarkan sumber, batch, dan ukuran.
-                const map = {};
-
-                const tambah = (
-                    sumber,
-                    batch,
-                    jenis,
-                    ukuran,
-                    jumlah,
-                    lokasi = ""
-                ) => {
-                    const sumberFinal = sumber || "Media tabur";
-                    const batchFinal = batch || "-";
-                    const ukuranFinal = ukuran || "Belum dicatat";
-
-                    const key =
-                        sumberFinal + "|" +
-                        batchFinal + "|" +
-                        ukuranFinal;
-
-                    if (!map[key]) {
-                        map[key] = {
-                            sumber: sumberFinal,
-                            batch: batchFinal,
-                            jenis:
-                                jenis ||
-                                jenisBatch[batchFinal] ||
-                                "Tidak diketahui",
-                            ukuran: ukuranFinal,
-                            masuk: 0,
-                            keluar: 0,
-                            lokasi
-                        };
-                    }
-
-                    map[key].masuk += Number(jumlah || 0);
-
-                    if (jenis) map[key].jenis = jenis;
-                    if (ukuran) map[key].ukuran = ukuran;
-                    if (lokasi) map[key].lokasi = lokasi;
-                };
-
-                // Bibit hasil penyapihan.
-                sapih.forEach((x) => {
-                    const d = x.data();
-
-                    tambah(
-                        "Media tabur",
-                        d.batch,
-                        d.jenis || jenisBatch[d.batch],
-                        d.ukuran,
-                        d.jumlah,
-                        d.lokasi
-                    );
-                });
-
-                // Bibit hasil cabutan.
-                cabutan.forEach((x) => {
-                    const d = x.data();
-
-                    tambah(
-                        "Cabutan",
-                        d.batch,
-                        d.jenis,
-                        d.ukuran,
-                        d.jumlah,
-                        d.lokasi
-                    );
-                });
-
-                // Mengurangi stok berdasarkan distribusi.
-                distribusi.forEach((x) => {
-                    const d = x.data();
-
-                    const sumber = d.sumber || "Media tabur";
-                    const batch = d.batch || "-";
+                    const batch = String(d.batch).trim();
                     const ukuran = d.ukuran || "Belum dicatat";
 
-                    const key = sumber + "|" + batch + "|" + ukuran;
+                    // Batch yang sama tetapi ukurannya berbeda
+                    // akan menjadi kelompok opname yang berbeda.
+                    const kunci = `${sumber}|||${batch}|||${ukuran}`;
 
-                    if (!map[key]) {
-                        map[key] = {
-                            sumber,
+                    if (!kelompok.has(kunci)) {
+                        kelompok.set(kunci, {
                             batch,
-                            jenis:
-                                d.jenis ||
-                                jenisBatch[batch] ||
-                                "Tidak diketahui",
+                            sumber,
                             ukuran,
-                            masuk: 0,
-                            keluar: 0,
-                            lokasi: ""
-                        };
+                            jenis: d.jenis || "Tidak diketahui",
+                            jumlah: 0,
+                            lokasi: d.lokasi || d.asal || "-"
+                        });
                     }
 
-                    map[key].keluar += Number(d.jumlah || 0);
+                    const item = kelompok.get(kunci);
 
-                    if (d.jenis) {
-                        map[key].jenis = d.jenis;
-                    }
-                });
-
-                // Harga berdasarkan jenis dan ukuran bibit.
-                const hargaMap = {};
-
-                harga.forEach((x) => {
-                    const d = x.data();
-
-                    hargaMap[keyHarga(d.jenis, d.ukuran)] =
-                        Number(d.harga || 0);
-                });
-
-                // Mengambil opname fisik TERBARU per sumber dan batch.
-                // Opname merupakan jumlah fisik pada saat pencatatan,
-                // bukan transaksi penambahan stok.
-                const opnameTerbaru = {};
-
-                opname.forEach((x) => {
-                    const d = x.data();
-                    const sumber = d.sumber || "Belum tercatat";
-                    const batch = d.batch || "-";
-                    const key = keyBatch(sumber, batch);
-                    const waktu = waktuMillis(d.timestamp);
+                    item.jumlah += Number(d.jumlah) || 0;
 
                     if (
-                        !opnameTerbaru[key] ||
-                        waktu > opnameTerbaru[key].waktu
+                        item.jenis === "Tidak diketahui" &&
+                        d.jenis
                     ) {
-                        opnameTerbaru[key] = {
-                            jumlah: Number(d.jumlah || 0),
-                            waktu,
-                            catatan: d.catatan || ""
-                        };
-                    }
-                });
-
-                // Perhitungan stok buku dan nilai persediaan.
-                const rows = Object.values(map).map((d) => {
-                    const stok = d.masuk - d.keluar;
-                    const hargaBibit =
-                        hargaMap[keyHarga(d.jenis, d.ukuran)] || 0;
-
-                    return {
-                        ...d,
-                        stok,
-                        harga: hargaBibit,
-                        nilai: Math.max(0, stok) * hargaBibit
-                    };
-                });
-
-                // Rekap stok buku pada tingkat sumber dan batch.
-                const rekapBatch = {};
-
-                rows.forEach((d) => {
-                    const key = keyBatch(d.sumber, d.batch);
-
-                    if (!rekapBatch[key]) {
-                        rekapBatch[key] = {
-                            masuk: 0,
-                            keluar: 0,
-                            stok: 0
-                        };
+                        item.jenis = d.jenis;
                     }
 
-                    rekapBatch[key].masuk += d.masuk;
-                    rekapBatch[key].keluar += d.keluar;
-                    rekapBatch[key].stok += d.stok;
+                    if (
+                        (!item.lokasi || item.lokasi === "-") &&
+                        (d.lokasi || d.asal)
+                    ) {
+                        item.lokasi = d.lokasi || d.asal;
+                    }
                 });
+            }
 
-                const totalStok = rows.reduce(
-                    (total, d) => total + Math.max(0, d.stok),
-                    0
-                );
+            gabungkanBatch(snapSapih, "Penyapihan");
+            gabungkanBatch(snapCabutan, "Cabutan");
 
-                const totalNilai = rows.reduce(
-                    (total, d) => total + d.nilai,
-                    0
-                );
+            daftarBatch = Array.from(kelompok.values()).sort((a, b) =>
+                a.batch.localeCompare(b.batch) ||
+                a.ukuran.localeCompare(b.ukuran)
+            );
 
-                const totalMasuk = rows.reduce(
-                    (total, d) => total + d.masuk,
-                    0
-                );
+            batchSelect.innerHTML =
+                '<option value="">-- Pilih Batch dan Tinggi Bibit --</option>';
 
-                const totalKeluar = rows.reduce(
-                    (total, d) => total + d.keluar,
-                    0
-                );
+            daftarBatch.forEach(item => {
+                const option = document.createElement("option");
 
-                const jumlahBatchOpname =
-                    Object.keys(opnameTerbaru).length;
+                option.value =
+                    `${item.sumber}|||${item.batch}|||${item.ukuran}`;
 
-                document.getElementById("total-stok").textContent =
-                    totalStok.toLocaleString("id-ID") + " Bibit";
+                option.textContent =
+                    `${item.batch} | ${item.jenis} | ${item.ukuran} | ${item.sumber} | Jumlah awal: ${angka(item.jumlah)}`;
 
-                document.getElementById("nilai-stok").textContent =
-                    rupiah(totalNilai);
+                batchSelect.appendChild(option);
+            });
 
-                document.getElementById("total-masuk").textContent =
-                    totalMasuk.toLocaleString("id-ID") + " Bibit";
-
-                document.getElementById("total-keluar").textContent =
-                    totalKeluar.toLocaleString("id-ID") + " Bibit";
-
-                document.getElementById("total-opname").textContent =
-                    jumlahBatchOpname.toLocaleString("id-ID") + " Batch";
-
-                // Menampilkan tabel stok.
-                tbody.innerHTML = "";
-
-                if (rows.length === 0) {
-                    const tr = document.createElement("tr");
-                    buatSel(
-                        tr,
-                        "Belum ada data stok bibit.",
-                        "text-center text-slate-400"
-                    ).colSpan = 12;
-                    tbody.appendChild(tr);
-                } else {
-                    // Agar nilai opname batch tidak tampil berulang
-                    // pada setiap ukuran bibit dalam batch yang sama.
-                    const opnameSudahDitampilkan = new Set();
-
-                    rows.forEach((d, i) => {
-                        const tr = document.createElement("tr");
-                        tr.className =
-                            "border-b hover:bg-emerald-50";
-
-                        const key = keyBatch(d.sumber, d.batch);
-                        const batchInfo = rekapBatch[key];
-                        const opnameData = opnameTerbaru[key];
-
-                        buatSel(tr, i + 1);
-                        buatSel(tr, d.sumber);
-                        buatSel(tr, d.batch, "font-medium");
-                        buatSel(tr, d.jenis);
-                        buatSel(tr, d.ukuran || "Belum dicatat");
-                        buatSel(
-                            tr,
-                            d.masuk.toLocaleString("id-ID")
-                        );
-                        buatSel(
-                            tr,
-                            d.keluar.toLocaleString("id-ID")
-                        );
-
-                        const stokCell = buatSel(
-                            tr,
-                            d.stok.toLocaleString("id-ID"),
-                            "font-bold " +
-                            (d.stok < 0
-                                ? "text-red-700"
-                                : "text-emerald-700")
-                        );
-
-                        if (d.stok < 0) {
-                            stokCell.title =
-                                "Jumlah distribusi melebihi jumlah bibit masuk.";
-                        }
-
-                        // Opname ditampilkan satu kali per batch.
-                        if (
-                            opnameData &&
-                            !opnameSudahDitampilkan.has(key)
-                        ) {
-                            buatSel(
-                                tr,
-                                opnameData.jumlah.toLocaleString("id-ID"),
-                                "font-semibold text-blue-700"
-                            );
-
-                            const selisih =
-                                opnameData.jumlah - batchInfo.stok;
-
-                            buatSel(
-                                tr,
-                                selisih.toLocaleString("id-ID"),
-                                "font-semibold " +
-                                (selisih < 0
-                                    ? "text-red-700"
-                                    : "text-blue-700")
-                            );
-
-                            opnameSudahDitampilkan.add(key);
-                        } else {
-                            buatSel(tr, "-");
-                            buatSel(tr, "-");
-                        }
-
-                        buatSel(
-                            tr,
-                            d.harga ? rupiah(d.harga) : "Belum diatur"
-                        );
-
-                        buatSel(tr, rupiah(d.nilai));
-
-                        tbody.appendChild(tr);
-                    });
-                }
-
-                // Menampilkan tabel harga.
-                tbodyHarga.innerHTML = "";
-
-                if (harga.empty) {
-                    const tr = document.createElement("tr");
-                    buatSel(
-                        tr,
-                        "Harga belum diatur.",
-                        "text-center text-slate-400"
-                    ).colSpan = 6;
-                    tbodyHarga.appendChild(tr);
-                } else {
-                    let no = 1;
-
-                    harga.forEach((x) => {
-                        const d = x.data();
-                        const tr = document.createElement("tr");
-
-                        tr.className =
-                            "border-b hover:bg-emerald-50";
-
-                        buatSel(tr, no++);
-                        buatSel(tr, d.jenis);
-                        buatSel(tr, d.ukuran || "Belum dicatat");
-                        buatSel(
-                            tr,
-                            rupiah(d.harga),
-                            "font-semibold"
-                        );
-                        buatSel(tr, d.satuan || "per bibit");
-                        buatSel(tr, d.keterangan || "-");
-
-                        tbodyHarga.appendChild(tr);
-                    });
-                }
-
-            } catch (error) {
-                console.error("Gagal memuat data stok bibit:", error);
-
-                document.getElementById("total-stok").textContent =
-                    "Gagal memuat";
-
-                document.getElementById("nilai-stok").textContent =
-                    "Gagal memuat";
-
-                document.getElementById("total-masuk").textContent = "-";
-                document.getElementById("total-keluar").textContent = "-";
-                document.getElementById("total-opname").textContent = "-";
-
-                tbody.innerHTML = "";
-
-                const tr = document.createElement("tr");
-                buatSel(
-                    tr,
-                    "Gagal memuat stok: " + error.message,
-                    "text-center text-red-600"
-                ).colSpan = 12;
-
-                tbody.appendChild(tr);
-
-                tbodyHarga.innerHTML = "";
-
-                const trHarga = document.createElement("tr");
-                buatSel(
-                    trHarga,
-                    "Gagal memuat harga: " + error.message,
-                    "text-center text-red-600"
-                ).colSpan = 6;
-
-                tbodyHarga.appendChild(trHarga);
+            if (daftarBatch.length === 0) {
+                batchSelect.innerHTML =
+                    '<option value="">Belum ada batch penyapihan atau cabutan</option>';
             }
         }
 
-        // Memuat data setelah autentikasi berhasil.
-        await muatData();
+        // ==========================================
+        // INFORMASI BATCH YANG DIPILIH
+        // ==========================================
 
-        // Menyimpan atau memperbarui harga bibit.
-        window.simpanHarga = async function(e) {
+        function tampilkanInfoBatch() {
+            const pilihan = batchSelect.value;
+            const info = document.getElementById("info-batch");
+
+            if (!pilihan) {
+                info.classList.add("hidden");
+                info.textContent = "";
+                return;
+            }
+
+            const item = daftarBatch.find(
+                d =>
+                    `${d.sumber}|||${d.batch}|||${d.ukuran}` === pilihan
+            );
+
+            if (!item) return;
+
+            info.classList.remove("hidden");
+            info.innerHTML = "";
+
+            const judul = document.createElement("p");
+            judul.className = "font-semibold text-emerald-800";
+            judul.textContent = `${item.batch} - ${item.sumber}`;
+
+            const jenis = document.createElement("p");
+            jenis.textContent = `Jenis tanaman: ${item.jenis}`;
+
+            const ukuran = document.createElement("p");
+            ukuran.textContent = `Tinggi bibit: ${item.ukuran}`;
+
+            const jumlah = document.createElement("p");
+            jumlah.textContent =
+                `Jumlah tercatat dari sumber: ${angka(item.jumlah)} bibit`;
+
+            const lokasi = document.createElement("p");
+            lokasi.textContent = `Lokasi: ${item.lokasi}`;
+
+            info.append(judul, jenis, ukuran, jumlah, lokasi);
+        }
+
+        batchSelect.addEventListener("change", tampilkanInfoBatch);
+
+        // ==========================================
+        // MEMUAT RIWAYAT OPNAME
+        // ==========================================
+
+        async function muatRiwayat() {
+            const qOpname = query(
+                collection(db, "opname_fisik"),
+                orderBy("timestamp", "desc")
+            );
+
+            const snapOpname = await getDocs(qOpname);
+
+            dataOpname = snapOpname.docs.map(docData => ({
+                id: docData.id,
+                ...docData.data()
+            }));
+
+            tampilkanRiwayat();
+            tampilkanRingkasan();
+        }
+
+        function tampilkanRiwayat() {
+            tabelData.innerHTML = "";
+
+            if (dataOpname.length === 0) {
+                tabelData.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="p-4 text-center text-slate-400">
+                            Belum ada riwayat opname fisik.
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            dataOpname.forEach((d, index) => {
+                const tr = document.createElement("tr");
+                tr.className = "border-b hover:bg-emerald-50";
+
+                const waktu = d.timestamp?.toDate
+                    ? d.timestamp.toDate().toLocaleString("id-ID")
+                    : "-";
+
+                const nilai = [
+                    index + 1,
+                    d.batch || "-",
+                    d.sumber || "Belum tercatat",
+                    d.ukuran || "Belum dicatat",
+                    `${angka(d.jumlah)} Bibit`,
+                    d.catatan || "-",
+                    waktu
+                ];
+
+                nilai.forEach((item, i) => {
+                    const td = document.createElement("td");
+                    td.className = "p-3";
+                    td.textContent = item;
+
+                    if (i === 1) {
+                        td.classList.add("font-medium");
+                    }
+
+                    if (i === 4) {
+                        td.classList.add(
+                            "font-semibold",
+                            "text-orange-700"
+                        );
+                    }
+
+                    tr.appendChild(td);
+                });
+
+                tabelData.appendChild(tr);
+            });
+        }
+
+        // ==========================================
+        // RINGKASAN OPNAME
+        // ==========================================
+
+        function tampilkanRingkasan() {
+            document.getElementById("total-batch").textContent =
+                angka(daftarBatch.length);
+
+            document.getElementById("total-riwayat").textContent =
+                angka(dataOpname.length);
+
+            const totalFisik = dataOpname.reduce(
+                (total, d) => total + (Number(d.jumlah) || 0),
+                0
+            );
+
+            document.getElementById("total-opname").textContent =
+                angka(totalFisik);
+        }
+
+        // ==========================================
+        // MEMUAT SELURUH DATA
+        // ==========================================
+
+        async function loadDataAwal() {
+            try {
+                tabelData.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="p-4 text-center text-slate-400">
+                            Memuat data...
+                        </td>
+                    </tr>
+                `;
+
+                await muatBatch();
+                await muatRiwayat();
+
+            } catch (error) {
+                console.error("Gagal memuat data opname:", error);
+
+                tabelData.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="p-4 text-center text-red-600">
+                            Gagal memuat data: ${error.message}
+                        </td>
+                    </tr>
+                `;
+
+                alert(
+                    "Gagal memuat data opname. Periksa koneksi atau konfigurasi Firestore."
+                );
+            }
+        }
+
+        await loadDataAwal();
+
+        // ==========================================
+        // MENYIMPAN OPNAME FISIK
+        // ==========================================
+
+        formOpname.addEventListener("submit", async function(e) {
             e.preventDefault();
 
-            const jenis =
-                document.getElementById("h-jenis").value.trim();
+            const pilihan = batchSelect.value;
 
-            const ukuran =
-                document.getElementById("h-ukuran").value.trim();
+            const jumlah = Number(
+                document.getElementById("o-jumlah").value
+            );
 
-            const harga =
-                Number(document.getElementById("h-harga").value);
+            const catatan =
+                document.getElementById("o-catatan").value.trim();
 
-            const keterangan =
-                document.getElementById("h-keterangan").value.trim();
+            if (!pilihan) {
+                alert("Silakan pilih batch dan tinggi bibit terlebih dahulu.");
+                return;
+            }
 
-            if (
-                !jenis ||
-                !ukuran ||
-                !Number.isFinite(harga) ||
-                harga < 0 ||
-                !Number.isInteger(harga)
-            ) {
+            if (!Number.isInteger(jumlah) || jumlah < 0) {
                 alert(
-                    "Lengkapi jenis, ukuran, dan harga yang valid. " +
-                    "Harga harus berupa bilangan bulat minimal 0."
+                    "Jumlah fisik harus berupa bilangan bulat dan tidak boleh kurang dari 0."
                 );
                 return;
             }
 
-            const form = document.getElementById("form-harga");
-            const tombol = form.querySelector('button[type="submit"]');
+            const item = daftarBatch.find(
+                d =>
+                    `${d.sumber}|||${d.batch}|||${d.ukuran}` === pilihan
+            );
 
-            tombol.disabled = true;
-            tombol.textContent = "Menyimpan...";
+            if (!item) {
+                alert("Batch tidak ditemukan. Silakan muat ulang halaman.");
+                return;
+            }
+
+            tombolSimpan.disabled = true;
+            tombolSimpan.textContent = "Menyimpan...";
 
             try {
-                const id = keyHarga(jenis, ukuran)
-                    .replace(/[^a-z0-9_]+/g, "-")
-                    .replace(/^-|-$/g, "");
-
-                await setDoc(
-                    doc(db, "harga_bibit", id),
-                    {
-                        jenis,
-                        ukuran,
-                        harga,
-                        satuan: "per bibit",
-                        keterangan,
-                        timestamp: new Date()
-                    }
-                );
+                await addDoc(collection(db, "opname_fisik"), {
+                    batch: item.batch,
+                    sumber: item.sumber,
+                    jenis: item.jenis,
+                    ukuran: item.ukuran,
+                    jumlah: jumlah,
+                    catatan: catatan,
+                    timestamp: new Date()
+                });
 
                 alert(
-                    "Harga bibit berhasil disimpan atau diperbarui."
+                    `Opname fisik berhasil disimpan.\n\n` +
+                    `Batch: ${item.batch}\n` +
+                    `Tinggi: ${item.ukuran}\n` +
+                    `Jumlah fisik: ${angka(jumlah)} bibit`
                 );
 
-                form.reset();
+                formOpname.reset();
+                document.getElementById("info-batch").classList.add("hidden");
 
-                // Perbarui tabel tanpa memuat ulang halaman.
-                await muatData();
+                await muatRiwayat();
 
-            } catch (err) {
-                console.error("Gagal menyimpan harga:", err);
-                alert("Gagal menyimpan harga: " + err.message);
+            } catch (error) {
+                console.error("Gagal menyimpan opname:", error);
+                alert("Gagal menyimpan opname: " + error.message);
 
             } finally {
-                tombol.disabled = false;
-                tombol.textContent = "Simpan Harga";
+                tombolSimpan.disabled = false;
+                tombolSimpan.textContent = "Simpan Opname";
             }
-        };
+        });
+
     </script>
 </head>
 
@@ -561,10 +376,12 @@
 
     <header class="bg-emerald-800 text-white shadow-md">
         <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-            <h1 class="text-xl font-bold">🌱 SIP - Stok Bibit & Harga</h1>
+            <h1 class="text-xl font-bold">
+                🌱 SIP - Opname Fisik Bedeng
+            </h1>
 
             <a href="index.html"
-               class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">
+                class="text-xs bg-emerald-900 px-3 py-1.5 rounded-lg">
                 Kembali
             </a>
         </div>
@@ -572,217 +389,133 @@
 
     <main class="max-w-7xl mx-auto px-4 py-8 space-y-8">
 
-        <!-- Ringkasan stok -->
-        <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-
-            <div class="bg-white p-5 rounded-xl shadow border-l-4 border-emerald-600">
-                <p class="text-sm text-slate-500">Total Stok Tersedia</p>
-                <p id="total-stok"
-                   class="text-2xl font-bold text-emerald-800 mt-1">
-                    Memuat...
-                </p>
-            </div>
-
-            <div class="bg-white p-5 rounded-xl shadow border-l-4 border-amber-500">
-                <p class="text-sm text-slate-500">Estimasi Nilai Persediaan</p>
-                <p id="nilai-stok"
-                   class="text-2xl font-bold text-amber-800 mt-1">
-                    Memuat...
-                </p>
-            </div>
-
-            <div class="bg-white p-5 rounded-xl shadow border-l-4 border-blue-500">
-                <p class="text-sm text-slate-500">Total Bibit Masuk</p>
-                <p id="total-masuk"
-                   class="text-2xl font-bold text-blue-800 mt-1">
-                    Memuat...
-                </p>
-            </div>
-
-            <div class="bg-white p-5 rounded-xl shadow border-l-4 border-red-500">
-                <p class="text-sm text-slate-500">Total Bibit Keluar</p>
-                <p id="total-keluar"
-                   class="text-2xl font-bold text-red-800 mt-1">
-                    Memuat...
-                </p>
-            </div>
-
-            <div class="bg-white p-5 rounded-xl shadow border-l-4 border-indigo-500">
-                <p class="text-sm text-slate-500">Batch Sudah Diopname</p>
-                <p id="total-opname"
-                   class="text-2xl font-bold text-indigo-800 mt-1">
-                    Memuat...
-                </p>
-            </div>
-
-        </section>
-
-        <!-- Daftar stok -->
-        <section class="bg-white p-6 rounded-2xl shadow">
-
-            <h2 class="text-xl font-bold text-emerald-900 mb-3">
-                Daftar Stok Bibit
+        <!-- RINGKASAN -->
+        <section>
+            <h2 class="text-xl font-bold text-emerald-900 mb-4">
+                Ringkasan Opname Fisik
             </h2>
 
-            <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5 text-sm text-blue-900">
-                <p class="font-semibold mb-1">Keterangan perhitungan stok</p>
-                <p>
-                    Stok buku dihitung dari jumlah bibit hasil penyapihan
-                    dan cabutan dikurangi distribusi. Opname fisik
-                    ditampilkan sebagai pembanding berdasarkan sumber
-                    dan batch, menggunakan catatan opname terbaru.
-                </p>
-                <p class="mt-2">
-                    Selisih positif berarti jumlah fisik lebih banyak
-                    daripada stok buku. Selisih negatif berarti jumlah
-                    fisik lebih sedikit daripada stok buku.
-                </p>
-                <p class="mt-2">
-                    Jika satu batch memiliki beberapa ukuran bibit,
-                    jumlah opname hanya ditampilkan satu kali pada batch
-                    tersebut karena data opname saat ini belum mencatat
-                    rincian ukuran.
-                </p>
-                <p class="mt-2">
-                    Data lama yang belum memiliki catatan tinggi bibit
-                    akan ditampilkan sebagai "Belum dicatat".
-                </p>
-            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
 
-            <div class="overflow-x-auto">
-                <table class="w-full text-left text-sm">
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Jumlah Kelompok Batch</p>
+                    <p id="total-batch"
+                        class="text-2xl font-bold text-emerald-800">0</p>
+                    <p class="text-xs text-slate-400">
+                        Berdasarkan sumber dan tinggi bibit
+                    </p>
+                </div>
 
-                    <thead>
-                        <tr class="bg-emerald-100 text-emerald-900">
-                            <th class="p-3">No</th>
-                            <th class="p-3">Sumber</th>
-                            <th class="p-3">Batch</th>
-                            <th class="p-3">Jenis</th>
-                            <th class="p-3">Ukuran</th>
-                            <th class="p-3">Masuk</th>
-                            <th class="p-3">Keluar</th>
-                            <th class="p-3">Stok Buku</th>
-                            <th class="p-3">Opname Fisik</th>
-                            <th class="p-3">Selisih</th>
-                            <th class="p-3">Harga/Bibit</th>
-                            <th class="p-3">Nilai Stok</th>
-                        </tr>
-                    </thead>
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Jumlah Riwayat Opname</p>
+                    <p id="total-riwayat"
+                        class="text-2xl font-bold text-blue-700">0</p>
+                    <p class="text-xs text-slate-400">
+                        Seluruh pencatatan
+                    </p>
+                </div>
 
-                    <tbody id="tabel-stok">
-                        <tr>
-                            <td colspan="12"
-                                class="p-4 text-center">
-                                Memuat data...
-                            </td>
-                        </tr>
-                    </tbody>
+                <div class="bg-white p-5 rounded-2xl shadow">
+                    <p class="text-sm text-slate-500">Akumulasi Jumlah Fisik</p>
+                    <p id="total-opname"
+                        class="text-2xl font-bold text-orange-700">0</p>
+                    <p class="text-xs text-slate-400">
+                        Total seluruh riwayat, bukan stok terkini
+                    </p>
+                </div>
 
-                </table>
             </div>
         </section>
 
-        <!-- Pengaturan harga -->
+        <!-- FORM OPNAME -->
         <section class="bg-white p-6 rounded-2xl shadow">
 
             <h2 class="text-xl font-bold text-emerald-900 mb-4">
-                Pengaturan Harga Bibit
+                Koreksi Jumlah Fisik Terbaru di Bedeng
             </h2>
 
-            <form id="form-harga"
-                  onsubmit="simpanHarga(event)"
-                  class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <form id="form-opname" class="space-y-4">
 
                 <div>
                     <label class="block text-sm font-medium">
-                        Jenis Tanaman
+                        Pilih Batch dan Tinggi Bibit
                     </label>
 
-                    <input
-                        id="h-jenis"
-                        required
-                        placeholder="Contoh: Pulai (Alstonia sp.)"
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium">
-                        Ukuran / Tinggi Bibit
-                    </label>
-
-                    <select
-                        id="h-ukuran"
-                        required
-                        class="w-full mt-1 p-3 border rounded-xl bg-white"
-                    >
-                        <option value="">Pilih ukuran tinggi bibit</option>
-                        <option value="10–20 cm">10–20 cm</option>
-                        <option value="20–30 cm">20–30 cm</option>
-                        <option value="30–50 cm">30–50 cm</option>
-                        <option value="50–80 cm">50–80 cm</option>
-                        <option value="80–100 cm">80–100 cm</option>
-                        <option value="100–150 cm">100–150 cm</option>
-                        <option value="Di atas 150 cm">Di atas 150 cm</option>
+                    <select id="o-batch" required
+                        class="w-full mt-1 p-3 border rounded-xl bg-white">
+                        <option value="">Memuat batch...</option>
                     </select>
+
+                    <p class="text-xs text-slate-500 mt-2">
+                        Batch ditampilkan terpisah berdasarkan sumber bibit
+                        dan rentang tinggi agar jumlah fisik tidak tercampur.
+                    </p>
+                </div>
+
+                <div id="info-batch"
+                    class="hidden bg-emerald-50 border border-emerald-200 p-4 rounded-xl text-sm space-y-1">
                 </div>
 
                 <div>
                     <label class="block text-sm font-medium">
-                        Harga per Bibit (Rp)
+                        Jumlah Sisa Fisik Terbaru
                     </label>
 
-                    <input
-                        id="h-harga"
-                        type="number"
-                        min="0"
-                        step="1"
-                        required
-                        placeholder="5000"
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                    <input type="number" id="o-jumlah"
+                        min="0" step="1" required
+                        placeholder="Contoh: 3800"
+                        class="w-full mt-1 p-3 border rounded-xl">
+
+                    <p class="text-xs text-slate-500 mt-1">
+                        Masukkan jumlah bibit yang benar-benar tersedia
+                        saat dilakukan opname untuk kelompok tinggi yang dipilih.
+                    </p>
                 </div>
 
                 <div>
                     <label class="block text-sm font-medium">
-                        Keterangan
+                        Catatan / Alasan
                     </label>
 
-                    <input
-                        id="h-keterangan"
-                        placeholder="Ukuran/umur/kelas bibit"
-                        class="w-full mt-1 p-3 border rounded-xl"
-                    >
+                    <input type="text" id="o-catatan"
+                        placeholder="Contoh: Opname mingguan"
+                        class="w-full mt-1 p-3 border rounded-xl">
                 </div>
 
-                <div class="md:col-span-2">
-                    <button
-                        type="submit"
-                        class="w-full bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium cursor-pointer disabled:opacity-50"
-                    >
-                        Simpan Harga
-                    </button>
-                </div>
+                <button id="tombol-simpan" type="submit"
+                    class="w-full bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium cursor-pointer disabled:opacity-50">
+                    Simpan Opname
+                </button>
 
             </form>
+        </section>
 
-            <div class="overflow-x-auto mt-6">
-                <table class="w-full text-left text-sm">
+        <!-- RIWAYAT OPNAME -->
+        <section class="bg-white p-6 rounded-2xl shadow">
+
+            <h3 class="text-lg font-bold text-emerald-900 mb-4">
+                Riwayat Opname Fisik
+            </h3>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-sm">
 
                     <thead>
                         <tr class="bg-emerald-100 text-emerald-900">
                             <th class="p-3">No</th>
-                            <th class="p-3">Jenis Tanaman</th>
-                            <th class="p-3">Ukuran</th>
-                            <th class="p-3">Harga</th>
-                            <th class="p-3">Satuan</th>
-                            <th class="p-3">Keterangan</th>
+                            <th class="p-3">Batch</th>
+                            <th class="p-3">Sumber Bibit</th>
+                            <th class="p-3">Tinggi Bibit</th>
+                            <th class="p-3">Jumlah Fisik</th>
+                            <th class="p-3">Catatan</th>
+                            <th class="p-3">Waktu Pencatatan</th>
                         </tr>
                     </thead>
 
-                    <tbody id="tabel-harga">
+                    <tbody id="tabel-data">
                         <tr>
-                            <td colspan="6" class="p-4 text-center">
+                            <td colspan="7"
+                                class="p-4 text-center text-slate-400">
                                 Memuat data...
                             </td>
                         </tr>
@@ -790,7 +523,6 @@
 
                 </table>
             </div>
-
         </section>
 
     </main>
