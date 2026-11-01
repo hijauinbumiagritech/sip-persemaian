@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -11,7 +10,7 @@
         import { db, requireAuth } from "./firebase.js";
         import {
             collection, addDoc, getDocs, query, orderBy,
-            doc, updateDoc
+            doc, updateDoc, deleteDoc
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         if (!(await requireAuth())) throw new Error("Login diperlukan.");
@@ -101,7 +100,7 @@
             tbody.innerHTML = "";
 
             if (!dataMasuk.length) {
-                tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-slate-400">Belum ada riwayat stok masuk.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-slate-400">Belum ada riwayat stok masuk.</td></tr>`;
                 return;
             }
 
@@ -113,9 +112,35 @@
                     <td class="p-3">${aman(d.tanggal || "-")}</td>
                     <td class="p-3">${aman(d.jenis || "-")}</td>
                     <td class="p-3 font-semibold text-emerald-700">${rupiahVolume(d.volume)} m³</td>
+                    <td class="p-3"><button class="text-red-700 font-semibold" data-hapus-masuk="${aman(d.id)}">Hapus</button></td>
                 `;
                 tbody.appendChild(tr);
             });
+            tbody.querySelectorAll("[data-hapus-masuk]").forEach(btn => {
+                btn.addEventListener("click", () => hapusStokMasuk(btn.dataset.hapusMasuk));
+            });
+        }
+
+        async function hapusStokMasuk(id) {
+            const d = dataMasuk.find(x => x.id === id);
+            if (!d) return;
+
+            const masukTersisa = totalMasuk(d.jenis) - Number(d.volume || 0);
+            const terpakai = totalPakai(d.jenis);
+
+            if (masukTersisa < terpakai) {
+                alert(`Stok ini tidak dapat dihapus karena akan membuat stok ${d.jenis} menjadi minus. Stok masuk tersisa: ${rupiahVolume(masukTersisa)} m³; sudah dipakai: ${rupiahVolume(terpakai)} m³.`);
+                return;
+            }
+
+            if (!confirm(`Hapus catatan stok ${d.jenis} tanggal ${d.tanggal} sebanyak ${rupiahVolume(d.volume)} m³?`)) return;
+
+            try {
+                await deleteDoc(doc(db, "bahan_media", id));
+                await muatData();
+            } catch (e) {
+                alert("Gagal menghapus stok: " + e.message);
+            }
         }
 
         function tampilkanPakai() {
@@ -201,7 +226,6 @@
             }
 
             try {
-                // Muat ulang untuk memeriksa stok terbaru sebelum menyimpan.
                 const snap = await getDocs(koleksiPakai);
                 dataPakai = snap.docs.map(x => ({ id: x.id, ...x.data() }));
 
@@ -346,10 +370,10 @@
             <table class="w-full text-left text-sm">
                 <thead><tr class="bg-emerald-100 text-emerald-900">
                     <th class="p-3">No</th><th class="p-3">Tanggal</th>
-                    <th class="p-3">Jenis Bahan</th><th class="p-3">Volume Masuk</th>
+                    <th class="p-3">Jenis Bahan</th><th class="p-3">Volume Masuk</th><th class="p-3">Aksi</th>
                 </tr></thead>
                 <tbody id="tabel-data">
-                    <tr><td colspan="4" class="p-4 text-center text-slate-400">Memuat data...</td></tr>
+                    <tr><td colspan="5" class="p-4 text-center text-slate-400">Memuat data...</td></tr>
                 </tbody>
             </table>
         </div>
