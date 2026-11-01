@@ -405,11 +405,22 @@
 
                 <div>
                     <label class="block text-sm font-medium">
-                        Ukuran / Tinggi Bibit
+                        Tinggi Bibit (cm)
                     </label>
-                    <input id="c-ukuran" required
-                        placeholder="Contoh: 20–30 cm atau 80–100 cm"
-                        class="w-full mt-1 p-3 border rounded-xl">
+
+                    <select id="c-ukuran" required
+                        class="w-full mt-1 p-3 border rounded-xl bg-white">
+
+                        <option value="">-- Pilih Tinggi Bibit --</option>
+                        <option value="10–20 cm">10–20 cm</option>
+                        <option value="20–30 cm">20–30 cm</option>
+                        <option value="30–50 cm">30–50 cm</option>
+                        <option value="50–80 cm">50–80 cm</option>
+                        <option value="80–100 cm">80–100 cm</option>
+                        <option value="100–150 cm">100–150 cm</option>
+                        <option value="Di atas 150 cm">Di atas 150 cm</option>
+
+                    </select>
                 </div>
 
                 <div>
@@ -482,7 +493,7 @@
                             <th class="p-3">No</th>
                             <th class="p-3">Batch</th>
                             <th class="p-3">Jenis</th>
-                            <th class="p-3">Ukuran</th>
+                            <th class="p-3">Tinggi</th>
                             <th class="p-3">Tanggal</th>
                             <th class="p-3">Asal Cabutan</th>
                             <th class="p-3">Jumlah</th>
