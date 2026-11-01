@@ -1,6 +1,3 @@
-
-
-```html
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -10,11 +7,9 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
     <style>
+        /* IDENTITAS PERUSAHAAN - 3D COMPACT */
         .company-hero {
             position: relative;
             overflow: hidden;
@@ -103,6 +98,10 @@
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         let chartPerkembangan = null;
+
+        // ==========================================
+        // FUNGSI DASAR
+        // ==========================================
 
         const jumlah = d => {
             const n = Number(d?.jumlah);
@@ -254,8 +253,10 @@
 
             chartPerkembangan = new Chart(canvas, {
                 type: "line",
+
                 data: {
                     labels,
+
                     datasets: [
                         {
                             label: "Benih ditabur (butir)",
@@ -287,18 +288,22 @@
                         }
                     ]
                 },
+
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+
                     interaction: {
                         mode: "index",
                         intersect: false
                     },
+
                     plugins: {
                         legend: {
                             position: "bottom"
                         }
                     },
+
                     scales: {
                         y: {
                             beginAtZero: true,
@@ -306,6 +311,7 @@
                                 callback: v => formatAngka(v)
                             }
                         },
+
                         x: {
                             ticks: {
                                 maxRotation: 45,
@@ -337,10 +343,12 @@
 
             function tambahAnomali(level, kode, title, detail) {
                 if (alertKeys.has(kode)) return;
+
                 alertKeys.add(kode);
                 alerts.push({ level, title, detail });
             }
 
+            // 1. VALIDASI DATA DASAR
             function periksaJumlah(snapshot, nama) {
                 snapshot.forEach(doc => {
                     const d = doc.data();
@@ -373,6 +381,7 @@
             periksaJumlah(snapPolybag, "Pengisian polybag");
             periksaJumlah(snapOpname, "Opname fisik");
 
+            // 2. REKAP BENIH DITABUR
             const tabur = {};
 
             snapTabur.forEach(doc => {
@@ -396,6 +405,7 @@
                 tabur[key] = (tabur[key] || 0) + Number(d.jumlah);
             });
 
+            // 3. REKAP PRODUKSI BIBIT
             const produksi = {};
 
             function tambahProduksi(snapshot, sumber, nama) {
@@ -425,6 +435,7 @@
             tambahProduksi(snapSapih, "Media tabur", "penyapihan");
             tambahProduksi(snapCabutan, "Cabutan", "cabutan");
 
+            // 4. CEK PENYAPIHAN MELEBIHI TABUR
             Object.entries(produksi).forEach(([key, totalSapih]) => {
                 const [sumber, batch, jenis] = JSON.parse(key);
 
@@ -452,6 +463,7 @@
                 }
             });
 
+            // 5. REKAP DISTRIBUSI
             const distribusi = {};
 
             snapDist.forEach(doc => {
@@ -496,6 +508,7 @@
                 }
             });
 
+            // 6. DISTRIBUSI MELEBIHI PRODUKSI
             Object.entries(distribusi).forEach(([key, totalKeluar]) => {
                 const totalProduksi = produksi[key];
                 const [sumber, batch, jenis] = JSON.parse(key);
@@ -520,6 +533,7 @@
                 }
             });
 
+            // 7. PEMAKAIAN POLYBAG
             const jumlahSnapshot = snapshot =>
                 snapshot.docs.reduce((total, doc) => {
                     const d = doc.data();
@@ -542,6 +556,7 @@
                 );
             }
 
+            // 8. OPNAME TERBARU
             const opnameTerbaru = {};
 
             snapOpname.forEach(doc => {
@@ -587,6 +602,7 @@
                 }
             });
 
+            // 9. BANDINGKAN OPNAME DENGAN STOK SISTEM
             Object.entries(opnameTerbaru).forEach(([key, opname]) => {
                 const [sumber, batch, jenis] = JSON.parse(key);
                 const totalProduksi = produksi[key];
@@ -618,11 +634,13 @@
                 }
             });
 
+            // 10. URUTKAN PERINGATAN
             alerts.sort((a, b) => {
                 const urutan = { danger: 0, warning: 1 };
                 return urutan[a.level] - urutan[b.level];
             });
 
+            // 11. TAMPILKAN HASIL
             const container = document.getElementById("daftar-anomali");
             const count = document.getElementById("jumlah-anomali");
 
@@ -715,6 +733,7 @@
                     getDocs(collection(db, "distribusi_das"))
                 ]);
 
+                // STOK BAHAN MEDIA
                 let totalTanah = 0;
                 let totalPupuk = 0;
 
@@ -733,6 +752,7 @@
                     }
                 });
 
+                // PENGISIAN DAN PEMAKAIAN POLYBAG
                 const totalPolybag = snapPolybag.docs.reduce(
                     (a, x) => a + jumlah(x.data()),
                     0
@@ -751,6 +771,7 @@
                 const totalPemakaian = totalSapih + totalCabutan;
                 const sisaMedia = totalPolybag - totalPemakaian;
 
+                // BENIH DAN DISTRIBUSI
                 const totalBenih = snapTabur.docs.reduce(
                     (a, x) => a + jumlah(x.data()),
                     0
@@ -764,6 +785,7 @@
                 const totalStok =
                     totalSapih + totalCabutan - totalDist;
 
+                // OPNAME TERBARU
                 const opnameTerbaru = {};
 
                 snapOpname.forEach(doc => {
@@ -795,6 +817,7 @@
                         0
                     );
 
+                // TAMPILKAN KARTU DASHBOARD
                 document.getElementById("stat-tanah").textContent =
                     `${totalTanah.toFixed(1)} m³`;
 
@@ -857,10 +880,12 @@
                 document.getElementById("stat-distribusi").textContent =
                     `${formatAngka(totalDist)} Bibit`;
 
+                // STATUS PEMBARUAN
                 status.textContent =
                     "Data berhasil diperbarui: " +
                     new Date().toLocaleString("id-ID");
 
+                // GRAFIK
                 gambarGrafik(
                     snapTabur,
                     snapSapih,
@@ -868,6 +893,7 @@
                     snapDist
                 );
 
+                // ANOMALI
                 tampilkanAnomali({
                     snapTabur,
                     snapSapih,
@@ -893,450 +919,13 @@
             }
         }
 
-        // ==========================================
-        // EKSPOR DATA CSV DAN PDF
-        // ==========================================
-
-        const koleksiEkspor = [
-            { nama: "bahan_media", judul: "Bahan Media" },
-            { nama: "isi_polybag", judul: "Pengisian Polybag" },
-            { nama: "tabur_benih", judul: "Tabur Benih" },
-            { nama: "penyapihan", judul: "Penyapihan" },
-            { nama: "perawatan", judul: "Perawatan" },
-            { nama: "opname_fisik", judul: "Opname Fisik" },
-            { nama: "cabutan_bibit", judul: "Cabutan Bibit" },
-            { nama: "distribusi_das", judul: "Distribusi DAS" },
-            { nama: "harga_bibit", judul: "Harga Bibit" }
-        ];
-
-        function nilaiEkspor(value) {
-            if (value === null || value === undefined) return "";
-
-            if (value?.toDate) {
-                return value.toDate().toLocaleString("id-ID");
-            }
-
-            if (value instanceof Date) {
-                return value.toLocaleString("id-ID");
-            }
-
-            if (typeof value === "object") {
-                return JSON.stringify(value);
-            }
-
-            return String(value);
-        }
-
-        function escapeCSV(value) {
-            const text = nilaiEkspor(value);
-            return `"${text.replace(/"/g, '""')}"`;
-        }
-
-        function dataKeCSV(dokumen) {
-            const semuaKolom = new Set(["ID Dokumen"]);
-
-            dokumen.forEach(item => {
-                Object.keys(item.data).forEach(key => {
-                    semuaKolom.add(key);
-                });
-            });
-
-            const kolom = Array.from(semuaKolom);
-
-            const baris = [
-                kolom.map(escapeCSV).join(";"),
-                ...dokumen.map(item =>
-                    kolom.map(key =>
-                        escapeCSV(
-                            key === "ID Dokumen"
-                                ? item.id
-                                : item.data[key]
-                        )
-                    ).join(";")
-                )
-            ];
-
-            return "\uFEFF" + baris.join("\r\n");
-        }
-
-        async function ambilSemuaDataEkspor() {
-            const hasil = [];
-
-            for (const item of koleksiEkspor) {
-                const snapshot = await getDocs(
-                    collection(db, item.nama)
-                );
-
-                const dokumen = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    data: doc.data()
-                }));
-
-                hasil.push({
-                    ...item,
-                    dokumen
-                });
-            }
-
-            return hasil;
-        }
-
-        function tanggalNamaFile() {
-            return new Date().toISOString().slice(0, 10);
-        }
-
-        function setStatusEkspor(pesan) {
-            const el = document.getElementById("status-ekspor");
-            if (el) el.textContent = pesan;
-        }
-
-        function kunciTombolEkspor(aktif) {
-            ["btn-ekspor-csv", "btn-ekspor-pdf"].forEach(id => {
-                const btn = document.getElementById(id);
-                if (btn) btn.disabled = aktif;
-            });
-        }
-
-        window.exportLaporanCSV = async function() {
-            try {
-                kunciTombolEkspor(true);
-                setStatusEkspor("Mengambil data dari Firestore...");
-
-                if (!window.JSZip) {
-                    throw new Error("Library JSZip belum berhasil dimuat.");
-                }
-
-                const semuaData = await ambilSemuaDataEkspor();
-                const zip = new JSZip();
-
-                const ringkasan = [
-                    ["LAPORAN DATA SIP PERSEMAIAN"],
-                    ["PT. HIJAUIN BUMI AGRITECH"],
-                    ["Tanggal Ekspor", new Date().toLocaleString("id-ID")],
-                    [],
-                    ["Nama Sheet", "Jumlah Dokumen"]
-                ];
-
-                semuaData.forEach(item => {
-                    ringkasan.push([
-                        item.judul,
-                        item.dokumen.length
-                    ]);
-
-                    const namaFile = item.nama + ".csv";
-                    zip.file(
-                        namaFile,
-                        dataKeCSV(item.dokumen)
-                    );
-                });
-
-                const csvRingkasan =
-                    "\uFEFF" +
-                    ringkasan.map(row =>
-                        row.map(escapeCSV).join(";")
-                    ).join("\r\n");
-
-                zip.file(
-                    "00_Ringkasan_Seluruh_Sheet.csv",
-                    csvRingkasan
-                );
-
-                setStatusEkspor("Membuat file ZIP CSV...");
-
-                const blob = await zip.generateAsync({
-                    type: "blob",
-                    compression: "DEFLATE",
-                    compressionOptions: { level: 6 }
-                });
-
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement("a");
-
-                link.href = url;
-                link.download =
-                    `Laporan_SIP_Persemaian_${tanggalNamaFile()}.zip`;
-
-                document.body.appendChild(link);
-                link.click();
-                link.remove();
-
-                URL.revokeObjectURL(url);
-
-                setStatusEkspor(
-                    "Ekspor CSV berhasil. File ZIP berisi ringkasan dan CSV setiap sheet."
-                );
-
-            } catch (error) {
-                console.error("Ekspor CSV gagal:", error);
-                setStatusEkspor("Ekspor CSV gagal: " + error.message);
-                alert("Ekspor CSV gagal: " + error.message);
-
-            } finally {
-                kunciTombolEkspor(false);
-            }
-        };
-
-        window.exportLaporanPDF = async function() {
-            try {
-                kunciTombolEkspor(true);
-                setStatusEkspor("Mengambil data untuk laporan PDF...");
-
-                if (!window.jspdf?.jsPDF) {
-                    throw new Error("Library jsPDF belum berhasil dimuat.");
-                }
-
-                const semuaData = await ambilSemuaDataEkspor();
-                const { jsPDF } = window.jspdf;
-
-                const pdf = new jsPDF({
-                    orientation: "landscape",
-                    unit: "mm",
-                    format: "a4"
-                });
-
-                const lebarHalaman =
-                    pdf.internal.pageSize.getWidth();
-
-                const tinggiHalaman =
-                    pdf.internal.pageSize.getHeight();
-
-                pdf.setFont("helvetica", "bold");
-                pdf.setFontSize(18);
-                pdf.text(
-                    "LAPORAN OPERASIONAL PERSEMAIAN",
-                    lebarHalaman / 2,
-                    16,
-                    { align: "center" }
-                );
-
-                pdf.setFontSize(12);
-                pdf.text(
-                    "PT. HIJAUIN BUMI AGRITECH",
-                    lebarHalaman / 2,
-                    23,
-                    { align: "center" }
-                );
-
-                pdf.setFont("helvetica", "normal");
-                pdf.setFontSize(9);
-                pdf.text(
-                    "Tanggal ekspor: " +
-                    new Date().toLocaleString("id-ID"),
-                    lebarHalaman / 2,
-                    29,
-                    { align: "center" }
-                );
-
-                const totalDokumen = semuaData.reduce(
-                    (total, item) =>
-                        total + item.dokumen.length,
-                    0
-                );
-
-                pdf.autoTable({
-                    startY: 35,
-                    head: [["Indikator", "Jumlah"]],
-                    body: [
-                        ["Total sheet", semuaData.length],
-                        ["Total seluruh dokumen", formatAngka(totalDokumen)],
-                        ...semuaData.map(item => [
-                            item.judul,
-                            formatAngka(item.dokumen.length) + " dokumen"
-                        ])
-                    ],
-                    theme: "grid",
-                    headStyles: {
-                        fillColor: [6, 78, 59]
-                    },
-                    styles: {
-                        fontSize: 8
-                    }
-                });
-
-                let posisiY = pdf.lastAutoTable.finalY + 12;
-
-                pdf.setFont("helvetica", "bold");
-                pdf.setFontSize(12);
-                pdf.text("ANALISIS RINGKAS", 14, posisiY);
-
-                posisiY += 7;
-
-                pdf.setFont("helvetica", "normal");
-                pdf.setFontSize(9);
-
-                const totalJumlah = nama =>
-                    semuaData
-                        .find(item => item.nama === nama)
-                        ?.dokumen.reduce(
-                            (total, item) =>
-                                total + jumlah(item.data),
-                            0
-                        ) || 0;
-
-                const analisis = [
-                    `Total benih ditabur: ${formatAngka(totalJumlah("tabur_benih"))}`,
-                    `Total bibit disapih: ${formatAngka(totalJumlah("penyapihan"))}`,
-                    `Total bibit cabutan: ${formatAngka(totalJumlah("cabutan_bibit"))}`,
-                    `Total distribusi tercatat: ${formatAngka(totalJumlah("distribusi_das"))}`,
-                    `Total polybag terisi: ${formatAngka(totalJumlah("isi_polybag"))}`
-                ];
-
-                analisis.forEach(teksAnalisis => {
-                    if (posisiY > tinggiHalaman - 15) {
-                        pdf.addPage();
-                        posisiY = 18;
-                    }
-
-                    pdf.text(teksAnalisis, 16, posisiY);
-                    posisiY += 6;
-                });
-
-                if (posisiY > tinggiHalaman - 65) {
-                    pdf.addPage();
-                    posisiY = 18;
-                }
-
-                pdf.setFont("helvetica", "bold");
-                pdf.setFontSize(12);
-                pdf.text("GRAFIK JUMLAH DOKUMEN PER SHEET", 14, posisiY);
-
-                posisiY += 6;
-
-                const chartCanvas = document.createElement("canvas");
-                chartCanvas.width = 1200;
-                chartCanvas.height = 450;
-
-                const chart = new Chart(chartCanvas, {
-                    type: "bar",
-                    data: {
-                        labels: semuaData.map(item => item.judul),
-                        datasets: [{
-                            label: "Jumlah dokumen",
-                            data: semuaData.map(item => item.dokumen.length),
-                            backgroundColor: "#047857"
-                        }]
-                    },
-                    options: {
-                        responsive: false,
-                        animation: false,
-                        plugins: {
-                            legend: { display: false }
-                        },
-                        scales: {
-                            y: {
-                                beginAtZero: true,
-                                ticks: { precision: 0 }
-                            }
-                        }
-                    }
-                });
-
-                const gambarGrafikPDF =
-                    chartCanvas.toDataURL("image/png");
-
-                pdf.addImage(
-                    gambarGrafikPDF,
-                    "PNG",
-                    14,
-                    posisiY,
-                    lebarHalaman - 28,
-                    55
-                );
-
-                chart.destroy();
-
-                // LAMPIRAN DATA MENTAH SETIAP KOLEKSI
-                for (const item of semuaData) {
-                    pdf.addPage("a4", "landscape");
-
-                    pdf.setFont("helvetica", "bold");
-                    pdf.setFontSize(13);
-                    pdf.text(
-                        "LAMPIRAN DATA: " + item.judul.toUpperCase(),
-                        14,
-                        16
-                    );
-
-                    if (!item.dokumen.length) {
-                        pdf.setFont("helvetica", "normal");
-                        pdf.setFontSize(10);
-                        pdf.text(
-                            "Tidak ada data pada sheet ini.",
-                            14,
-                            25
-                        );
-                        continue;
-                    }
-
-                    const semuaKolom = new Set(["ID Dokumen"]);
-
-                    item.dokumen.forEach(doc => {
-                        Object.keys(doc.data).forEach(key => {
-                            semuaKolom.add(key);
-                        });
-                    });
-
-                    const kolom = Array.from(semuaKolom);
-
-                    const body = item.dokumen.map(doc =>
-                        kolom.map(key =>
-                            nilaiEkspor(
-                                key === "ID Dokumen"
-                                    ? doc.id
-                                    : doc.data[key]
-                            )
-                        )
-                    );
-
-                    pdf.autoTable({
-                        startY: 22,
-                        head: [kolom],
-                        body,
-                        theme: "grid",
-                        headStyles: {
-                            fillColor: [6, 78, 59],
-                            fontSize: 7
-                        },
-                        styles: {
-                            fontSize: 6,
-                            cellPadding: 1.5,
-                            overflow: "linebreak"
-                        },
-                        margin: {
-                            left: 10,
-                            right: 10
-                        },
-                        horizontalPageBreak: true,
-                        horizontalPageBreakRepeat: 0
-                    });
-                }
-
-                setStatusEkspor("Menyimpan laporan PDF...");
-
-                pdf.save(
-                    `Laporan_SIP_Persemaian_${tanggalNamaFile()}.pdf`
-                );
-
-                setStatusEkspor(
-                    "Ekspor PDF berhasil. Laporan berisi ringkasan, analisis, grafik, dan lampiran data."
-                );
-
-            } catch (error) {
-                console.error("Ekspor PDF gagal:", error);
-                setStatusEkspor("Ekspor PDF gagal: " + error.message);
-                alert("Ekspor PDF gagal: " + error.message);
-
-            } finally {
-                kunciTombolEkspor(false);
-            }
-        };
-
         window.muatDataCloud = muatDataCloud;
     </script>
 </head>
 
 <body class="bg-emerald-50 text-slate-800 font-sans min-h-screen">
 
+    <!-- AUTH LOADING -->
     <div id="auth-loading"
          class="flex items-center justify-center min-h-screen px-4">
         <div class="text-center bg-white p-8 rounded-2xl shadow-lg">
@@ -1351,6 +940,7 @@
         </div>
     </div>
 
+    <!-- LOGIN SECTION -->
     <div id="login-section"
          class="hidden flex items-center justify-center min-h-screen px-4">
         <div class="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md space-y-6">
@@ -1390,6 +980,7 @@
         </div>
     </div>
 
+    <!-- DASHBOARD SECTION -->
     <div id="dashboard-section"
          class="hidden min-h-screen flex flex-col">
 
@@ -1406,6 +997,7 @@
             </div>
         </header>
 
+        <!-- MENU NAVIGASI -->
         <nav class="bg-emerald-700 text-white shadow-inner">
             <div class="max-w-7xl mx-auto px-4 flex overflow-x-auto space-x-2 py-3 text-sm">
 
@@ -1464,6 +1056,7 @@
 
         <main class="max-w-7xl mx-auto px-4 py-6 flex-1 space-y-6 w-full">
 
+            <!-- IDENTITAS PERUSAHAAN 3D -->
             <section class="company-hero">
                 <h1 class="company-title-3d">
                     PT. HIJAUIN BUMI AGRITECH
@@ -1488,40 +1081,7 @@
                 Menghubungkan ke database...
             </p>
 
-            <!-- PANEL EKSPOR -->
-            <section class="bg-white rounded-2xl shadow p-5 border border-emerald-100">
-                <div class="flex flex-wrap justify-between items-center gap-3">
-                    <div>
-                        <h3 class="text-lg font-bold text-emerald-900">
-                            Ekspor Laporan Persemaian
-                        </h3>
-                        <p class="text-xs text-slate-500 mt-1">
-                            Unduh seluruh data Firestore dalam format CSV atau PDF.
-                        </p>
-                    </div>
-
-                    <div class="flex flex-wrap gap-2">
-                        <button
-                            id="btn-ekspor-csv"
-                            onclick="exportLaporanCSV()"
-                            class="bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">
-                            📦 Ekspor CSV (ZIP)
-                        </button>
-
-                        <button
-                            id="btn-ekspor-pdf"
-                            onclick="exportLaporanPDF()"
-                            class="bg-rose-700 hover:bg-rose-800 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">
-                            📄 Ekspor PDF
-                        </button>
-                    </div>
-                </div>
-
-                <p id="status-ekspor" class="text-xs text-slate-500 mt-3">
-                    Siap mengekspor data.
-                </p>
-            </section>
-
+            <!-- RINGKASAN OPERASIONAL -->
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
 
                 <div class="bg-white p-5 rounded-xl shadow border-l-4 border-amber-600">
@@ -1596,6 +1156,7 @@
 
             </div>
 
+            <!-- GRAFIK DAN ANOMALI -->
             <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
                 <div class="lg:col-span-2 bg-white p-5 rounded-2xl shadow">
@@ -1655,6 +1216,7 @@
         </main>
     </div>
 
+    <!-- LOGIN FIREBASE -->
     <script type="module">
         import {
             auth,
@@ -1697,6 +1259,7 @@
             }
         }
 
+        // PROSES LOGIN
         window.prosesLogin = async function(event) {
             event.preventDefault();
 
@@ -1737,6 +1300,7 @@
             }
         };
 
+        // PROSES LOGOUT
         window.logout = async function() {
             try {
                 await signOutUser();
@@ -1747,6 +1311,7 @@
             }
         };
 
+        // PEMULIHAN SESI LOGIN
         try {
             await authReady;
 
@@ -1768,5 +1333,3 @@
 
 </body>
 </html>
-```
-
