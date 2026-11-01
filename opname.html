@@ -24,6 +24,16 @@
         const batchSelect = document.getElementById("o-batch");
         const tabelData = document.getElementById("tabel-data");
         const formOpname = document.getElementById("form-opname");
+
+        // Tanggal hari ini (zona waktu perangkat) dalam format YYYY-MM-DD.
+        const hariIni = () => {
+            const n = new Date();
+            const p = x => String(x).padStart(2, "0");
+            return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`;
+        };
+
+        const inputTanggal = document.getElementById("o-tanggal");
+        inputTanggal.value = hariIni();
         const tombolSimpan = document.getElementById("tombol-simpan");
 
         let daftarBatch = [];
@@ -288,6 +298,18 @@
             const catatan =
                 document.getElementById("o-catatan").value.trim();
 
+            const tanggal = inputTanggal.value;
+
+            if (!tanggal) {
+                alert("Tanggal opname wajib diisi.");
+                return;
+            }
+
+            if (tanggal > hariIni()) {
+                alert("Tanggal opname tidak boleh melebihi hari ini.");
+                return;
+            }
+
             if (!pilihan) {
                 alert("Silakan pilih batch terlebih dahulu.");
                 return;
@@ -315,8 +337,13 @@
             try {
                 await addDoc(collection(db, "opname_fisik"), {
                     batch: item.batch,
-                    sumber: item.sumber,
+                    // Penyapihan disimpan sebagai "Media tabur" agar sama dengan
+                    // sumber di data penyapihan, distribusi, dan dashboard.
+                    sumber: item.sumber === "Penyapihan"
+                        ? "Media tabur"
+                        : item.sumber,
                     jenis: item.jenis,
+                    tanggal: tanggal,
                     jumlah: jumlah,
                     catatan: catatan,
                     timestamp: new Date()
@@ -325,6 +352,7 @@
                 alert("Opname fisik berhasil disimpan.");
 
                 formOpname.reset();
+                inputTanggal.value = hariIni();
                 document.getElementById("info-batch").classList.add("hidden");
 
                 await muatRiwayat();
@@ -438,6 +466,20 @@
                     <p class="text-xs text-slate-500 mt-1">
                         Masukkan jumlah bibit yang benar-benar tersedia
                         saat dilakukan opname.
+                    </p>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium" for="o-tanggal">
+                        Tanggal Opname
+                    </label>
+
+                    <input type="date" id="o-tanggal" required
+                        class="w-full mt-1 p-3 border rounded-xl">
+
+                    <p class="text-xs text-slate-500 mt-1">
+                        Tanggal saat bibit dihitung di bedeng. Dashboard
+                        membandingkan hasil opname dengan stok pada tanggal ini.
                     </p>
                 </div>
 
