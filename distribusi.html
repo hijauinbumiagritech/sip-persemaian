@@ -20,7 +20,7 @@
             throw new Error("Login diperlukan.");
         }
 
-        // Peta stok tersedia berdasarkan sumber, batch, dan ukuran.
+        // Stok dikelompokkan berdasarkan sumber, batch, dan ukuran.
         let petaStok = {};
         let informasiStok = {};
 
@@ -48,13 +48,15 @@
 
             if (!pilihan || !informasiStok[pilihan]) {
                 info.textContent =
-                    "Pilih batch untuk melihat stok yang tersedia.";
+                    "Pilih kelompok stok untuk melihat stok yang tersedia.";
                 return;
             }
 
             const d = informasiStok[pilihan];
 
             info.textContent =
+                `Sumber: ${d.sumber} | ` +
+                `Batch: ${d.batch} | ` +
                 `Jenis: ${d.jenis} | ` +
                 `Ukuran: ${d.ukuran} | ` +
                 `Stok tersedia: ${formatJumlah(d.stok)} bibit`;
@@ -95,7 +97,7 @@
                     }
                 });
 
-                // Menggabungkan stok berdasarkan sumber, batch, ukuran.
+                // Menambahkan stok berdasarkan sumber, batch, dan ukuran.
                 function tambahStok(
                     sumber,
                     batch,
@@ -144,7 +146,7 @@
                     }
                 }
 
-                // Stok bibit hasil penyapihan.
+                // Bibit hasil penyapihan.
                 snapSapih.forEach((item) => {
                     const d = item.data();
 
@@ -158,7 +160,7 @@
                     );
                 });
 
-                // Stok bibit hasil cabutan.
+                // Bibit hasil cabutan.
                 snapCabutan.forEach((item) => {
                     const d = item.data();
 
@@ -172,7 +174,7 @@
                     );
                 });
 
-                // Menghitung jumlah distribusi yang sudah tercatat.
+                // Mengurangi stok berdasarkan distribusi terdahulu.
                 let totalDistribusi = 0;
 
                 snapDist.forEach((item) => {
@@ -193,8 +195,8 @@
                         ukuran
                     );
 
-                    // Jika data distribusi lama tidak memiliki
-                    // pasangan stok, buat catatan agar anomali terlihat.
+                    // Catatan distribusi lama yang tidak memiliki
+                    // pasangan stok tetap ditampilkan sebagai anomali.
                     if (!informasiStok[key]) {
                         informasiStok[key] = {
                             sumber,
@@ -214,9 +216,9 @@
                     informasiStok[key].keluar += jumlah;
                 });
 
-                // Menghitung stok tersedia.
+                // Menghitung stok tersedia setiap kelompok.
                 let totalStokTersedia = 0;
-                let jumlahBatchTersedia = 0;
+                let jumlahPilihanTersedia = 0;
 
                 Object.entries(informasiStok).forEach(
                     ([key, d]) => {
@@ -226,12 +228,11 @@
 
                         if (d.stok > 0) {
                             totalStokTersedia += d.stok;
-                            jumlahBatchTersedia++;
+                            jumlahPilihanTersedia++;
                         }
                     }
                 );
 
-                // Memperbarui ringkasan.
                 document.getElementById("total-tersedia")
                     .textContent =
                     formatJumlah(totalStokTersedia) + " Bibit";
@@ -242,14 +243,16 @@
 
                 document.getElementById("jumlah-batch")
                     .textContent =
-                    formatJumlah(jumlahBatchTersedia) + " Pilihan";
+                    formatJumlah(jumlahPilihanTersedia) + " Pilihan";
 
-                // Membuat ulang pilihan batch.
+                // Membuat pilihan stok.
                 select.innerHTML = "";
 
                 const pilihanAwal = document.createElement("option");
                 pilihanAwal.value = "";
-                pilihanAwal.textContent = "-- Pilih Batch --";
+                pilihanAwal.textContent =
+                    "-- Pilih Sumber, Batch, dan Ukuran Bibit --";
+
                 select.appendChild(pilihanAwal);
 
                 const daftar = Object.entries(informasiStok)
@@ -261,7 +264,14 @@
                             return sumberBanding;
                         }
 
-                        return a[1].batch.localeCompare(b[1].batch);
+                        const batchBanding =
+                            a[1].batch.localeCompare(b[1].batch);
+
+                        if (batchBanding !== 0) {
+                            return batchBanding;
+                        }
+
+                        return a[1].ukuran.localeCompare(b[1].ukuran);
                     });
 
                 daftar.forEach(([key, d]) => {
@@ -296,6 +306,7 @@
                     ).colSpan = 8;
 
                     tbody.appendChild(tr);
+
                 } else {
                     const riwayat = snapDist.docs.slice().sort(
                         (a, b) => {
@@ -313,21 +324,25 @@
                         const d = item.data();
                         const tr = document.createElement("tr");
 
-                        tr.className = "border-b hover:bg-emerald-50";
+                        tr.className =
+                            "border-b hover:bg-emerald-50";
 
                         buatSel(tr, index + 1);
                         buatSel(tr, d.tanggal || "-");
                         buatSel(tr, d.sumber || "Media tabur");
                         buatSel(tr, d.batch || "-", "font-medium");
+
                         buatSel(
                             tr,
                             d.ukuran || "Belum dicatat"
                         );
+
                         buatSel(
                             tr,
                             formatJumlah(d.jumlah) + " Bibit",
                             "font-semibold text-blue-700"
                         );
+
                         buatSel(tr, d.tujuan || "-");
                         buatSel(tr, d.sopir || "-");
 
@@ -362,22 +377,25 @@
             }
         }
 
-        // Menampilkan stok ketika batch dipilih.
+        // Memperbarui informasi stok saat pilihan berubah.
         document.getElementById("d-batch")
             .addEventListener("change", tampilkanStokPilihan);
 
-        // Menyimpan data distribusi.
+        // Menyimpan distribusi.
         window.simpanData = async function(e) {
             e.preventDefault();
 
             const form = document.getElementById("form-distribusi");
             const tombol = document.getElementById("tombol-simpan");
 
+            // Simpan key pilihan sebelum data dimuat ulang.
             const pilihan =
                 document.getElementById("d-batch").value;
 
             if (!pilihan) {
-                alert("Silakan pilih batch bibit terlebih dahulu.");
+                alert(
+                    "Silakan pilih sumber, batch, dan ukuran bibit terlebih dahulu."
+                );
                 return;
             }
 
@@ -415,8 +433,7 @@
             tombol.textContent = "Memeriksa stok...";
 
             try {
-                // Memuat ulang data sebelum menyimpan untuk
-                // mengurangi risiko menggunakan stok yang sudah lama.
+                // Memuat ulang stok sebelum menyimpan.
                 const berhasilMuat = await loadDataAwal();
 
                 if (!berhasilMuat) {
@@ -425,12 +442,14 @@
                     );
                 }
 
+                // Key pilihan tetap digunakan meskipun dropdown
+                // telah dibangun ulang saat memuat stok terbaru.
                 const dataStok = informasiStok[pilihan];
 
                 if (!dataStok) {
                     throw new Error(
-                        "Batch yang dipilih tidak ditemukan. " +
-                        "Silakan pilih ulang batch."
+                        "Kelompok stok yang dipilih tidak ditemukan. " +
+                        "Silakan pilih ulang."
                     );
                 }
 
@@ -443,7 +462,7 @@
                     alert(
                         `Jumlah distribusi (${formatJumlah(jumlahKeluar)}) ` +
                         `melebihi stok tersedia (${formatJumlah(stokTersedia)}) ` +
-                        `pada batch dan ukuran ini.`
+                        `pada kelompok sumber, batch, dan ukuran ini.`
                     );
 
                     return;
@@ -468,11 +487,8 @@
 
                 alert("Distribusi berhasil disimpan.");
 
-                // Form direset tanpa berpindah halaman.
                 form.reset();
 
-                // Memuat ulang ringkasan, pilihan batch,
-                // dan riwayat distribusi.
                 await loadDataAwal();
 
             } catch (error) {
@@ -491,7 +507,7 @@
             }
         };
 
-        // Memuat data pertama kali setelah autentikasi.
+        // Memuat data pertama kali.
         await loadDataAwal();
     </script>
 </head>
@@ -540,7 +556,7 @@
 
             <div class="bg-white p-5 rounded-xl shadow border-l-4 border-amber-500">
                 <p class="text-sm text-slate-500">
-                    Batch dengan Stok Tersedia
+                    Kelompok Stok Tersedia
                 </p>
 
                 <p id="jumlah-batch"
@@ -577,13 +593,13 @@
 
                 <div>
                     <label class="block text-sm font-medium">
-                        Pilih Batch Bibit
+                        Pilih Kelompok Stok Bibit
                     </label>
 
                     <select
                         id="d-batch"
                         required
-                        class="w-full mt-1 p-3 border rounded-xl"
+                        class="w-full mt-1 p-3 border rounded-xl bg-white"
                     >
                         <option value="">
                             Memuat data stok...
@@ -592,7 +608,14 @@
 
                     <p id="stok-info"
                        class="mt-2 text-sm text-emerald-700">
-                        Pilih batch untuk melihat stok yang tersedia.
+                        Pilih kelompok stok untuk melihat informasi
+                        sumber, batch, ukuran, dan jumlah bibit tersedia.
+                    </p>
+
+                    <p class="mt-2 text-xs text-slate-500">
+                        Ukuran bibit otomatis mengikuti kelompok stok
+                        yang dipilih. Pastikan ukuran dan batch sudah
+                        benar sebelum menyimpan distribusi.
                     </p>
                 </div>
 
