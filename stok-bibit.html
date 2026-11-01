@@ -14,7 +14,8 @@
             collection,
             getDocs,
             doc,
-            setDoc
+            setDoc,
+            deleteDoc
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         if (!(await requireAuth())) {
@@ -34,17 +35,25 @@
                 .toLowerCase()
                 .replace(/\s+/g, " ");
 
-        // Harga hanya berdasarkan jenis + ukuran, bukan batch.
+        // Harga ditentukan oleh jenis + ukuran.
+        // Batch tidak menjadi bagian dari identitas harga.
         const keyHarga = (jenis, ukuran) =>
             normal(jenis) + "__" + normal(ukuran);
 
-        // Stok keluar hanya berdasarkan sumber + batch.
+        // Stok keluar dihitung berdasarkan sumber + batch.
         const keyBatch = (sumber, batch) =>
             normal(sumber) + "|" + normal(batch);
 
-        // Baris stok masuk dikelompokkan berdasarkan sumber + batch + ukuran.
         const keyStok = (sumber, batch, ukuran) =>
             keyBatch(sumber, batch) + "|" + normal(ukuran);
+
+        let editingHargaId = null;
+
+        function idHarga(jenis, ukuran) {
+            return keyHarga(jenis, ukuran)
+                .replace(/[^a-z0-9_]+/g, "-")
+                .replace(/^-|-$/g, "");
+        }
 
         function waktuMillis(timestamp) {
             if (!timestamp) return 0;
@@ -94,7 +103,7 @@
                     getDocs(collection(db, "opname_fisik"))
                 ]);
 
-                // Pemetaan jenis tanaman berdasarkan kode batch tabur.
+                // Pemetaan jenis tanaman berdasarkan batch tabur.
                 const jenisBatch = {};
 
                 tabur.forEach((x) => {
@@ -151,6 +160,7 @@
                     const sumberFinal = sumber || "Media tabur";
                     const batchFinal = batch || "-";
                     const ukuranFinal = ukuran || "Belum dicatat";
+
                     const jenisFinal =
                         jenis ||
                         jenisBatch[normal(batchFinal)] ||
@@ -221,20 +231,16 @@
                     );
                 });
 
-                // 3. Distribusi: mendukung format baru multi-batch
-                //    dan format lama satu batch.
+                // 3. Membaca distribusi baru multi-batch
+                //    dan distribusi lama satu batch.
                 distribusi.forEach((x) => {
                     const d = x.data();
 
                     let rincian = [];
 
                     if (Array.isArray(d.items) && d.items.length > 0) {
-                        // Format baru:
-                        // satu dokumen distribusi berisi banyak batch.
                         rincian = d.items;
                     } else if (d.batch) {
-                        // Format lama:
-                        // satu dokumen distribusi berisi satu batch.
                         rincian = [{
                             sumber: d.sumber || "Media tabur",
                             batch: d.batch,
@@ -247,6 +253,7 @@
                     rincian.forEach((item) => {
                         const sumber = item.sumber || "Media tabur";
                         const batch = item.batch || "-";
+
                         const jenis =
                             item.jenis ||
                             jenisBatch[normal(batch)] ||
@@ -264,20 +271,20 @@
                             jenis
                         );
 
-                        // Pengurangan tidak menggunakan ukuran.
-                        // Ukuran pada distribusi hanya menjadi keterangan.
+                        // Distribusi mengurangi stok berdasarkan
+                        // sumber + batch, bukan ukuran.
                         batchData.keluar += jumlah;
                     });
                 });
 
-                // 4. Hitung stok akhir per sumber + batch.
+                // 4. Hitung stok per batch.
                 Object.values(rekapBatch).forEach((b) => {
                     b.stok = b.masuk - b.keluar;
                 });
 
                 // 5. Harga berdasarkan jenis + ukuran.
-                // Jika ada data harga ganda dari data lama,
-                // gunakan catatan dengan timestamp terbaru.
+                // Jika ditemukan duplikat lama, gunakan timestamp
+                // terbaru sebagai harga yang berlaku.
                 const hargaMap = {};
 
                 harga.forEach((x) => {
@@ -290,6 +297,7 @@
                         waktu >= hargaMap[key].waktu
                     ) {
                         hargaMap[key] = {
+                            id: x.id,
                             harga: Number(d.harga || 0),
                             waktu,
                             data: d
@@ -297,7 +305,7 @@
                     }
                 });
 
-                // 6. Ambil opname fisik terbaru per sumber + batch.
+                // 6. Opname terbaru per sumber + batch.
                 const opnameTerbaru = {};
 
                 opname.forEach((x) => {
@@ -319,9 +327,8 @@
                     }
                 });
 
-                // 7. Hitung harga rata-rata tertimbang per batch.
-                // Nilai stok adalah estimasi karena distribusi
-                // mengurangi stok pada tingkat batch, bukan ukuran.
+                // 7. Nilai persediaan menggunakan harga rata-rata
+                // tertimbang dari ukuran bibit yang masuk per batch.
                 Object.values(rekapBatch).forEach((b) => {
                     let totalNilaiMasuk = 0;
 
@@ -364,8 +371,8 @@
                     };
                 });
 
-                // Batch yang hanya memiliki data distribusi,
-                // tetapi tidak memiliki data stok masuk.
+                // Batch yang memiliki distribusi tetapi belum
+                // mempunyai rincian stok masuk tetap ditampilkan.
                 const batchDenganBaris = new Set(
                     rows.map((r) => keyBatch(r.sumber, r.batch))
                 );
@@ -386,7 +393,6 @@
                     }
                 });
 
-                // Urutkan agar baris satu batch berdekatan.
                 rows.sort((a, b) => {
                     const batchCompare =
                         keyBatch(a.sumber, a.batch).localeCompare(
@@ -402,6 +408,7 @@
                     );
                 });
 
+                // 9. Ringkasan.
                 const totalStok = Object.values(rekapBatch).reduce(
                     (total, b) =>
                         total + Math.max(0, b.stok),
@@ -439,7 +446,7 @@
                     Object.keys(opnameTerbaru).length.toLocaleString("id-ID") +
                     " Batch";
 
-                // 9. Tampilkan tabel stok.
+                // 10. Tabel stok.
                 tbody.innerHTML = "";
 
                 if (rows.length === 0) {
@@ -479,8 +486,6 @@
                             d.masuk.toLocaleString("id-ID")
                         );
 
-                        // Keluar dan stok sisa hanya ditampilkan
-                        // satu kali untuk setiap batch.
                         if (pertama) {
                             buatSel(
                                 tr,
@@ -505,7 +510,6 @@
                             buatSel(tr, "-");
                         }
 
-                        // Opname ditampilkan satu kali per batch.
                         if (
                             pertama &&
                             opnameData &&
@@ -535,7 +539,6 @@
                             buatSel(tr, "-");
                         }
 
-                        // Harga tetap ditampilkan per jenis + ukuran.
                         buatSel(
                             tr,
                             d.harga > 0
@@ -543,8 +546,6 @@
                                 : "Belum diatur"
                         );
 
-                        // Nilai persediaan batch ditampilkan satu kali.
-                        // Menggunakan harga rata-rata tertimbang.
                         if (pertama) {
                             buatSel(
                                 tr,
@@ -560,21 +561,22 @@
                     });
                 }
 
-                // 10. Tampilkan daftar harga.
+                // 11. Tabel harga dengan tombol Edit dan Hapus.
                 tbodyHarga.innerHTML = "";
 
                 const daftarHarga = Object.values(hargaMap)
-                    .map((x) => x.data)
                     .sort((a, b) => {
                         const jenisCompare =
-                            normal(a.jenis).localeCompare(normal(b.jenis));
+                            normal(a.data.jenis).localeCompare(
+                                normal(b.data.jenis)
+                            );
 
                         if (jenisCompare !== 0) {
                             return jenisCompare;
                         }
 
-                        return normal(a.ukuran).localeCompare(
-                            normal(b.ukuran)
+                        return normal(a.data.ukuran).localeCompare(
+                            normal(b.data.ukuran)
                         );
                     });
 
@@ -585,11 +587,12 @@
                         tr,
                         "Harga belum diatur.",
                         "text-center text-slate-400"
-                    ).colSpan = 6;
+                    ).colSpan = 7;
 
                     tbodyHarga.appendChild(tr);
                 } else {
-                    daftarHarga.forEach((d, i) => {
+                    daftarHarga.forEach((item, i) => {
+                        const d = item.data;
                         const tr = document.createElement("tr");
 
                         tr.className =
@@ -605,6 +608,38 @@
                         );
                         buatSel(tr, d.satuan || "per bibit");
                         buatSel(tr, d.keterangan || "-");
+
+                        const tdAksi = document.createElement("td");
+                        tdAksi.className =
+                            "p-3 whitespace-nowrap";
+
+                        const tombolEdit =
+                            document.createElement("button");
+
+                        tombolEdit.type = "button";
+                        tombolEdit.textContent = "Edit";
+                        tombolEdit.className =
+                            "bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg mr-2";
+
+                        tombolEdit.addEventListener("click", () => {
+                            window.editHarga(item.id, d);
+                        });
+
+                        const tombolHapus =
+                            document.createElement("button");
+
+                        tombolHapus.type = "button";
+                        tombolHapus.textContent = "Hapus";
+                        tombolHapus.className =
+                            "bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg";
+
+                        tombolHapus.addEventListener("click", () => {
+                            window.hapusHarga(item.id, d);
+                        });
+
+                        tdAksi.appendChild(tombolEdit);
+                        tdAksi.appendChild(tombolHapus);
+                        tr.appendChild(tdAksi);
 
                         tbodyHarga.appendChild(tr);
                     });
@@ -643,15 +678,89 @@
                     trHarga,
                     "Gagal memuat harga: " + error.message,
                     "text-center text-red-600"
-                ).colSpan = 6;
+                ).colSpan = 7;
 
                 tbodyHarga.appendChild(trHarga);
             }
         }
 
-        await muatData();
+        // 12. Edit harga.
+        window.editHarga = function(id, data) {
+            editingHargaId = id;
 
-        // Simpan/perbarui harga berdasarkan jenis + ukuran.
+            document.getElementById("h-jenis").value =
+                data.jenis || "";
+
+            document.getElementById("h-ukuran").value =
+                data.ukuran || "";
+
+            document.getElementById("h-harga").value =
+                data.harga ?? "";
+
+            document.getElementById("h-keterangan").value =
+                data.keterangan || "";
+
+            document.getElementById("judul-form-harga").textContent =
+                "Edit Harga Bibit";
+
+            const tombol = document.querySelector(
+                '#form-harga button[type="submit"]'
+            );
+
+            tombol.textContent = "Perbarui Harga";
+
+            document.getElementById("form-harga").scrollIntoView({
+                behavior: "smooth",
+                block: "center"
+            });
+        };
+
+        // 13. Batalkan mode edit.
+        window.batalEditHarga = function() {
+            editingHargaId = null;
+
+            document.getElementById("form-harga").reset();
+
+            document.getElementById("judul-form-harga").textContent =
+                "Pengaturan Harga Bibit";
+
+            document.querySelector(
+                '#form-harga button[type="submit"]'
+            ).textContent = "Simpan Harga";
+
+            document.getElementById("btn-batal-edit").classList.add("hidden");
+        };
+
+        // 14. Hapus harga.
+        window.hapusHarga = async function(id, data) {
+            const konfirmasi = confirm(
+                "Yakin ingin menghapus harga berikut?\n\n" +
+                "Jenis: " + (data.jenis || "-") + "\n" +
+                "Ukuran: " + (data.ukuran || "-") + "\n" +
+                "Harga: " + rupiah(data.harga) + "\n\n" +
+                "Penghapusan tidak menghapus stok atau riwayat distribusi."
+            );
+
+            if (!konfirmasi) return;
+
+            try {
+                await deleteDoc(doc(db, "harga_bibit", id));
+
+                if (editingHargaId === id) {
+                    window.batalEditHarga();
+                }
+
+                alert("Harga bibit berhasil dihapus.");
+
+                await muatData();
+
+            } catch (error) {
+                console.error("Gagal menghapus harga:", error);
+                alert("Gagal menghapus harga: " + error.message);
+            }
+        };
+
+        // 15. Simpan harga baru atau perbarui harga.
         window.simpanHarga = async function(e) {
             e.preventDefault();
 
@@ -682,36 +791,60 @@
             }
 
             const form = document.getElementById("form-harga");
-            const tombol = form.querySelector('button[type="submit"]');
+            const tombol = form.querySelector(
+                'button[type="submit"]'
+            );
 
             tombol.disabled = true;
             tombol.textContent = "Menyimpan...";
 
             try {
-                // ID dokumen ditentukan dari jenis + ukuran.
-                // Batch tidak menjadi bagian dari ID harga.
-                const id = keyHarga(jenis, ukuran)
-                    .replace(/[^a-z0-9_]+/g, "-")
-                    .replace(/^-|-$/g, "");
+                const dataHarga = {
+                    jenis,
+                    ukuran,
+                    harga,
+                    satuan: "per bibit",
+                    keterangan,
+                    timestamp: new Date()
+                };
 
-                await setDoc(
-                    doc(db, "harga_bibit", id),
-                    {
-                        jenis,
-                        ukuran,
-                        harga,
-                        satuan: "per bibit",
-                        keterangan,
-                        timestamp: new Date()
+                const targetId = idHarga(jenis, ukuran);
+
+                if (editingHargaId) {
+                    const idLama = editingHargaId;
+
+                    // Simpan pada ID yang sesuai dengan jenis + ukuran baru.
+                    // Jika jenis/ukuran berubah, hapus dokumen lama
+                    // setelah dokumen baru berhasil disimpan.
+                    await setDoc(
+                        doc(db, "harga_bibit", targetId),
+                        dataHarga
+                    );
+
+                    if (idLama !== targetId) {
+                        await deleteDoc(
+                            doc(db, "harga_bibit", idLama)
+                        );
                     }
-                );
 
-                alert(
-                    "Harga berhasil disimpan. Harga ini berlaku " +
-                    "untuk semua batch dengan jenis dan ukuran yang sama."
-                );
+                    alert("Harga bibit berhasil diperbarui.");
 
-                form.reset();
+                } else {
+                    // Jika kombinasi sudah ada, perbarui dokumen tersebut.
+                    await setDoc(
+                        doc(db, "harga_bibit", targetId),
+                        dataHarga
+                    );
+
+                    alert(
+                        "Harga bibit berhasil disimpan. " +
+                        "Harga berlaku untuk semua batch dengan " +
+                        "jenis dan ukuran yang sama."
+                    );
+                }
+
+                window.batalEditHarga();
+
                 await muatData();
 
             } catch (err) {
@@ -720,9 +853,14 @@
 
             } finally {
                 tombol.disabled = false;
-                tombol.textContent = "Simpan Harga";
+
+                tombol.textContent = editingHargaId
+                    ? "Perbarui Harga"
+                    : "Simpan Harga";
             }
         };
+
+        await muatData();
     </script>
 </head>
 
@@ -794,7 +932,9 @@
             </h2>
 
             <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5 text-sm text-blue-900">
-                <p class="font-semibold mb-1">Keterangan perhitungan stok</p>
+                <p class="font-semibold mb-1">
+                    Keterangan perhitungan stok
+                </p>
 
                 <p>
                     Stok masuk ditampilkan berdasarkan sumber, batch,
@@ -857,7 +997,8 @@
         <!-- Pengaturan harga -->
         <section class="bg-white p-6 rounded-2xl shadow">
 
-            <h2 class="text-xl font-bold text-emerald-900 mb-4">
+            <h2 id="judul-form-harga"
+                class="text-xl font-bold text-emerald-900 mb-4">
                 Pengaturan Harga Bibit
             </h2>
 
@@ -927,18 +1068,42 @@
                     >
                 </div>
 
-                <div class="md:col-span-2">
+                <div class="md:col-span-2 flex flex-col sm:flex-row gap-3">
+
                     <button
                         type="submit"
-                        class="w-full bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium cursor-pointer disabled:opacity-50"
+                        class="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium cursor-pointer disabled:opacity-50"
                     >
                         Simpan Harga
                     </button>
+
+                    <button
+                        id="btn-batal-edit"
+                        type="button"
+                        onclick="batalEditHarga()"
+                        class="hidden bg-slate-500 hover:bg-slate-600 text-white p-3 rounded-xl font-medium cursor-pointer"
+                    >
+                        Batal Edit
+                    </button>
+
                 </div>
 
             </form>
 
-            <div class="overflow-x-auto mt-6">
+            <div class="mt-6">
+                <h3 class="font-semibold text-emerald-900 mb-3">
+                    Daftar Harga Bibit
+                </h3>
+
+                <p class="text-sm text-slate-500 mb-3">
+                    Harga berlaku untuk seluruh batch dengan jenis
+                    dan ukuran yang sama. Gunakan tombol Edit untuk
+                    memperbarui harga atau Hapus untuk menghilangkan
+                    pengaturan harga.
+                </p>
+            </div>
+
+            <div class="overflow-x-auto">
                 <table class="w-full text-left text-sm">
 
                     <thead>
@@ -949,12 +1114,13 @@
                             <th class="p-3">Harga</th>
                             <th class="p-3">Satuan</th>
                             <th class="p-3">Keterangan</th>
+                            <th class="p-3">Aksi</th>
                         </tr>
                     </thead>
 
                     <tbody id="tabel-harga">
                         <tr>
-                            <td colspan="6" class="p-4 text-center">
+                            <td colspan="7" class="p-4 text-center">
                                 Memuat data...
                             </td>
                         </tr>
