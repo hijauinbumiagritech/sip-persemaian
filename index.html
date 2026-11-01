@@ -134,7 +134,7 @@
         const normalSumber = value => {
             const s = teks(value).toLowerCase();
 
-            if (s === "media tabur" || s === "tabur" || s === "penyapihan") {
+            if (s === "media tabur" || s === "tabur") {
                 return "Media tabur";
             }
 
@@ -189,23 +189,6 @@
         const tanggalDokumen = d =>
             tanggalValid(d?.timestamp) ||
             tanggalValid(d?.tanggal);
-
-        // Tanggal kejadian (YYYY-MM-DD). Dipakai untuk membandingkan opname
-        // dengan stok pada tanggal opname, bukan stok hari ini.
-        const tglString = d => {
-            if (
-                typeof d?.tanggal === "string" &&
-                /^\d{4}-\d{2}-\d{2}/.test(d.tanggal)
-            ) {
-                return d.tanggal.slice(0, 10);
-            }
-
-            const dt = tanggalDokumen(d);
-            if (!dt) return "";
-
-            const p = x => String(x).padStart(2, "0");
-            return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
-        };
 
         // ==========================================
         // GRAFIK PERKEMBANGAN 12 BULAN
@@ -404,7 +387,6 @@
 
             // 2. REKAP BENIH DITABUR
             const tabur = {};
-            const jenisPerBatch = {};
 
             snapTabur.forEach(doc => {
                 const d = doc.data();
@@ -423,28 +405,12 @@
                     return;
                 }
 
-                (jenisPerBatch[batch] ||= new Set()).add(jenis);
-
                 const key = kunci("Media tabur", batch, jenis);
                 tabur[key] = (tabur[key] || 0) + Number(d.jumlah);
             });
 
-            // 2b. SATU BATCH DENGAN BEBERAPA PENULISAN JENIS
-            Object.entries(jenisPerBatch).forEach(([batch, daftarJenis]) => {
-                if (daftarJenis.size > 1) {
-                    tambahAnomali(
-                        "warning",
-                        `tabur-jenis-ganda-${batch}`,
-                        `Penulisan jenis berbeda pada batch ${batch}`,
-                        `Batch ini tercatat dengan ${daftarJenis.size} penulisan jenis tanaman: ${[...daftarJenis].join("; ")}. Samakan penulisannya agar tabur, penyapihan, dan distribusi terhitung dalam satu batch.`
-                    );
-                }
-            });
-
             // 3. REKAP PRODUKSI BIBIT
             const produksi = {};
-            const produksiRiwayat = {};
-            const distribusiRiwayat = {};
 
             function tambahProduksi(snapshot, sumber, nama) {
                 snapshot.forEach(doc => {
@@ -467,11 +433,6 @@
                     const key = kunci(sumber, batch, jenis);
                     produksi[key] =
                         (produksi[key] || 0) + Number(d.jumlah);
-
-                    (produksiRiwayat[key] ||= []).push({
-                        tgl: tglString(d),
-                        jumlah: Number(d.jumlah)
-                    });
                 });
             }
 
@@ -540,11 +501,6 @@
                 const key = kunci(sumber, batch, jenis);
                 distribusi[key] =
                     (distribusi[key] || 0) + Number(d.jumlah);
-
-                (distribusiRiwayat[key] ||= []).push({
-                    tgl: tglString(d),
-                    jumlah: Number(d.jumlah)
-                });
 
                 if (!teks(d.ukuran)) {
                     tambahAnomali(
@@ -645,8 +601,7 @@
                 ) {
                     opnameTerbaru[key] = {
                         jumlah: Number(d.jumlah),
-                        tanggal,
-                        tgl: tglString(d)
+                        tanggal
                     };
                 }
             });
@@ -668,22 +623,8 @@
                     return;
                 }
 
-                // Stok sistem dihitung sampai tanggal opname, supaya transaksi
-                // sesudah opname tidak dianggap selisih.
-                const sampaiTanggal = (riwayat, tgl) =>
-                    (riwayat || []).reduce(
-                        (total, r) =>
-                            total + (
-                                !tgl || !r.tgl || r.tgl <= tgl
-                                    ? r.jumlah
-                                    : 0
-                            ),
-                        0
-                    );
-
-                const stokSistem =
-                    sampaiTanggal(produksiRiwayat[key], opname.tgl) -
-                    sampaiTanggal(distribusiRiwayat[key], opname.tgl);
+                const totalKeluar = distribusi[key] || 0;
+                const stokSistem = totalProduksi - totalKeluar;
 
                 if (stokSistem < 0) return;
 
@@ -692,7 +633,7 @@
                         "warning",
                         `opname-berbeda-${key}`,
                         `Opname berbeda dari stok sistem: ${batch}`,
-                        `Jenis ${jenis}, sumber ${sumber}. Opname fisik ${formatAngka(opname.jumlah)} bibit, sedangkan stok sistem pada tanggal opname ${formatAngka(stokSistem)} bibit. Selisih ${formatAngka(Math.abs(opname.jumlah - stokSistem))} bibit. Periksa kematian, kehilangan, pemindahan, atau pencatatan distribusi.`
+                        `Jenis ${jenis}, sumber ${sumber}. Opname fisik ${formatAngka(opname.jumlah)} bibit, sedangkan stok sistem ${formatAngka(stokSistem)} bibit. Selisih ${formatAngka(Math.abs(opname.jumlah - stokSistem))} bibit. Periksa kematian, kehilangan, pemindahan, atau pencatatan distribusi.`
                     );
                 }
             });
