@@ -22,13 +22,37 @@ const PILIHAN_TINGGI = [
 ];
 
 let informasiStok = {};
+let petaHarga = {};
 let sedangEditId = null;
 
 const buatKey = (sumber, batch) =>
     JSON.stringify([sumber, batch]);
 
+function normalisasi(nilai) {
+    return String(nilai || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[–—−]/g, "-")
+        .replace(/\s+/g, " ");
+}
+
+function keyHarga(jenis, ukuran) {
+    return JSON.stringify([
+        normalisasi(jenis),
+        normalisasi(ukuran)
+    ]);
+}
+
 function formatJumlah(nilai) {
     return Number(nilai || 0).toLocaleString("id-ID");
+}
+
+function formatRupiah(nilai) {
+    if (nilai === null || nilai === undefined || nilai === "") {
+        return "Belum tercatat";
+    }
+
+    return "Rp " + Number(nilai).toLocaleString("id-ID");
 }
 
 function escapeHTML(nilai) {
@@ -49,7 +73,6 @@ function buatSel(tr, nilai, className = "") {
 function ambilRincianDistribusi(d) {
     if (Array.isArray(d.items)) return d.items;
 
-    // Kompatibilitas distribusi format lama.
     if (d.batch) {
         return [{
             sumber: d.sumber || "Media tabur",
@@ -57,14 +80,19 @@ function ambilRincianDistribusi(d) {
             jenis: d.jenis || "-",
             ukuran: d.ukuran || "Belum dicatat",
             spesifikasi: d.spesifikasi || "-",
-            jumlah: Number(d.jumlah || 0)
+            jumlah: Number(d.jumlah || 0),
+            hargaSatuan: d.hargaSatuan ?? null,
+            totalHarga: d.totalHarga ?? null
         }];
     }
 
     return [];
 }
 
-// Menghitung jumlah yang telah dialokasikan pada baris lain.
+function ambilHarga(jenis, ukuran) {
+    return petaHarga[keyHarga(jenis, ukuran)] ?? null;
+}
+
 function jumlahDialokasikan(key, kecualiBaris = null) {
     let total = 0;
 
@@ -118,6 +146,40 @@ function buatOpsiBatch(nilaiTerpilih = "", baris = null) {
     `;
 }
 
+function tampilkanHargaBaris(baris) {
+    const key = baris.querySelector(".pilihan-batch").value;
+    const ukuran = baris.querySelector(".pilihan-ukuran").value;
+    const jumlah = Number(
+        baris.querySelector(".pilihan-jumlah").value || 0
+    );
+
+    const infoHarga = baris.querySelector(".harga-info");
+    const totalHarga = baris.querySelector(".total-harga-info");
+
+    if (!key || !informasiStok[key] || !ukuran) {
+        infoHarga.textContent = "Pilih batch dan tinggi bibit untuk melihat harga.";
+        totalHarga.textContent = "Nilai pengiriman: -";
+        return;
+    }
+
+    const jenis = informasiStok[key].jenis;
+    const harga = ambilHarga(jenis, ukuran);
+
+    if (harga === null) {
+        infoHarga.textContent =
+            `Harga ${jenis} ukuran ${ukuran} belum tersedia di Stok Bibit.`;
+
+        totalHarga.textContent = "Nilai pengiriman: Belum tersedia";
+        return;
+    }
+
+    infoHarga.textContent =
+        `Harga terbaru: ${formatRupiah(harga)} per bibit`;
+
+    totalHarga.textContent =
+        `Nilai pengiriman: ${formatRupiah(harga * jumlah)}`;
+}
+
 function tampilkanStokBaris(baris) {
     const key = baris.querySelector(".pilihan-batch").value;
     const info = baris.querySelector(".stok-info");
@@ -129,6 +191,7 @@ function tampilkanStokBaris(baris) {
         batas.textContent = "";
         input.removeAttribute("max");
         input.setCustomValidity("");
+        tampilkanHargaBaris(baris);
         return;
     }
 
@@ -158,17 +221,47 @@ function tampilkanStokBaris(baris) {
         info.classList.remove("text-red-700");
         info.classList.add("text-emerald-700");
     }
+
+    tampilkanHargaBaris(baris);
 }
 
 function hitungTotalForm() {
     let total = 0;
+    let nilaiPengiriman = 0;
+    let semuaHargaTersedia = true;
 
-    document.querySelectorAll(".pilihan-jumlah").forEach(input => {
-        total += Number(input.value || 0);
+    document.querySelectorAll(".baris-batch").forEach(baris => {
+        const jumlah = Number(
+            baris.querySelector(".pilihan-jumlah").value || 0
+        );
+
+        total += jumlah;
+
+        const key = baris.querySelector(".pilihan-batch").value;
+        const ukuran = baris.querySelector(".pilihan-ukuran").value;
+
+        if (!key || !ukuran || !informasiStok[key]) {
+            semuaHargaTersedia = false;
+            return;
+        }
+
+        const harga = ambilHarga(informasiStok[key].jenis, ukuran);
+
+        if (harga === null) {
+            semuaHargaTersedia = false;
+            return;
+        }
+
+        nilaiPengiriman += harga * jumlah;
     });
 
     document.getElementById("total-form").textContent =
         formatJumlah(total) + " Bibit";
+
+    document.getElementById("nilai-total-form").textContent =
+        semuaHargaTersedia
+            ? formatRupiah(nilaiPengiriman)
+            : "Belum lengkap";
 }
 
 function perbaruiSemuaBaris() {
@@ -217,9 +310,6 @@ function buatBarisBatch(dataAwal = null) {
                     `<option value="${escapeHTML(x)}">${escapeHTML(x)}</option>`
                 ).join("")}
             </select>
-            <p class="mt-1 text-xs text-slate-500">
-                Tinggi merupakan informasi bibit dan bukan kunci pengurangan stok.
-            </p>
         </div>
 
         <div>
@@ -234,6 +324,15 @@ function buatBarisBatch(dataAwal = null) {
             <input type="number" class="pilihan-jumlah w-full mt-1 p-3 border rounded-xl"
                 min="1" step="1" required placeholder="Contoh: 500">
             <p class="batas-info mt-1 text-xs text-slate-500"></p>
+        </div>
+
+        <div class="rounded-lg bg-white border border-emerald-200 p-3">
+            <p class="harga-info text-sm font-semibold text-emerald-800">
+                Harga akan ditampilkan setelah batch dan tinggi dipilih.
+            </p>
+            <p class="total-harga-info mt-1 text-sm font-bold text-blue-800">
+                Nilai pengiriman: -
+            </p>
         </div>
     `;
 
@@ -254,6 +353,9 @@ function buatBarisBatch(dataAwal = null) {
 
     baris.querySelector(".pilihan-jumlah")
         .addEventListener("input", perbaruiSemuaBaris);
+
+    baris.querySelector(".pilihan-ukuran")
+        .addEventListener("change", perbaruiSemuaBaris);
 
     if (dataAwal) {
         baris.querySelector(".pilihan-ukuran").value =
@@ -294,16 +396,6 @@ function aturModeEdit(aktif) {
     }
 }
 
-function resetModeEdit() {
-    sedangEditId = null;
-
-    document.getElementById("form-distribusi").reset();
-    document.getElementById("daftar-batch").innerHTML = "";
-
-    buatBarisBatch();
-    aturModeEdit(false);
-}
-
 async function loadDataAwal() {
     const tbody = document.getElementById("tabel-data");
 
@@ -312,15 +404,42 @@ async function loadDataAwal() {
             snapTabur,
             snapSapih,
             snapCabutan,
-            snapDist
+            snapDist,
+            snapHarga
         ] = await Promise.all([
             getDocs(collection(db, "tabur_benih")),
             getDocs(collection(db, "penyapihan")),
             getDocs(collection(db, "cabutan_bibit")),
-            getDocs(collection(db, "distribusi_das"))
+            getDocs(collection(db, "distribusi_das")),
+            getDocs(collection(db, "harga_bibit"))
         ]);
 
         informasiStok = {};
+        petaHarga = {};
+
+        snapHarga.forEach(item => {
+            const d = item.data();
+            const harga = Number(d.harga);
+
+            if (
+                d.jenis &&
+                d.ukuran &&
+                Number.isFinite(harga) &&
+                harga >= 0
+            ) {
+                const key = keyHarga(d.jenis, d.ukuran);
+                const waktu = d.timestamp?.toMillis?.() || 0;
+                const lama = petaHarga[key];
+
+                if (!lama || waktu >= lama.timestamp) {
+                    petaHarga[key] = {
+                        harga,
+                        timestamp: waktu
+                    };
+                }
+            }
+        });
+
         const jenisPerBatch = {};
 
         snapTabur.forEach(item => {
@@ -374,8 +493,6 @@ async function loadDataAwal() {
         snapDist.forEach(item => {
             const d = item.data();
 
-            // Ketika mengedit, distribusi yang sedang diedit
-            // tidak dikurangkan dari stok agar tidak terpotong dua kali.
             if (sedangEditId && item.id === sedangEditId) return;
 
             ambilRincianDistribusi(d).forEach(detail => {
@@ -429,13 +546,12 @@ async function loadDataAwal() {
 
         perbaruiSemuaBaris();
 
-        // Riwayat distribusi.
         tbody.innerHTML = "";
 
         if (snapDist.empty) {
             const tr = document.createElement("tr");
             buatSel(tr, "Belum ada riwayat distribusi bibit.",
-                "text-center text-slate-400").colSpan = 8;
+                "text-center text-slate-400").colSpan = 10;
             tbody.appendChild(tr);
         } else {
             const riwayat = snapDist.docs.slice().sort((a, b) => {
@@ -459,6 +575,14 @@ async function loadDataAwal() {
                     x.jenis || d.jenis || "-"
                 ).join("\n");
 
+                const daftarHarga = rincian.map(x =>
+                    formatRupiah(x.hargaSatuan)
+                ).join("\n");
+
+                const daftarNilai = rincian.map(x =>
+                    formatRupiah(x.totalHarga)
+                ).join("\n");
+
                 const daftarTinggi = rincian.map(x =>
                     x.ukuran || "Belum dicatat"
                 ).join("\n");
@@ -479,6 +603,8 @@ async function loadDataAwal() {
                     "whitespace-pre-line font-semibold text-blue-700"
                 );
 
+                buatSel(tr, daftarHarga, "whitespace-pre-line text-emerald-700");
+                buatSel(tr, daftarNilai, "whitespace-pre-line font-semibold text-blue-800");
                 buatSel(tr, d.tujuan || "-");
 
                 tr.title =
@@ -532,14 +658,13 @@ async function loadDataAwal() {
             tr,
             "Gagal memuat data: " + error.message,
             "text-center text-red-600"
-        ).colSpan = 8;
+        ).colSpan = 10;
 
         tbody.appendChild(tr);
         return false;
     }
 }
 
-// Membuka data distribusi ke dalam formulir untuk diedit.
 async function editDistribusi(id, data) {
     if (sedangEditId) {
         alert("Selesaikan atau batalkan proses edit sebelumnya terlebih dahulu.");
@@ -587,7 +712,6 @@ async function editDistribusi(id, data) {
         .scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-// Menghapus satu dokumen surat jalan beserta semua rincian batch.
 async function hapusDistribusi(id, data) {
     const rincian = ambilRincianDistribusi(data);
     const total = rincian.reduce(
@@ -632,7 +756,6 @@ document.getElementById("tombol-batal-edit")
         await loadDataAwal();
     });
 
-// Simpan distribusi baru atau perbarui dokumen yang sedang diedit.
 window.simpanData = async function(e) {
     e.preventDefault();
 
@@ -673,7 +796,6 @@ window.simpanData = async function(e) {
         }
     }
 
-    // Validasi alokasi pada formulir.
     const totalPerBatch = {};
 
     rincianForm.forEach(d => {
@@ -691,7 +813,6 @@ window.simpanData = async function(e) {
             throw new Error("Gagal memuat stok terbaru.");
         }
 
-        // Validasi terhadap stok terbaru.
         for (const [key, jumlahDiminta] of Object.entries(totalPerBatch)) {
             const dataStok = informasiStok[key];
 
@@ -712,6 +833,14 @@ window.simpanData = async function(e) {
 
         const items = rincianForm.map(d => {
             const stok = informasiStok[d.key];
+            const harga = ambilHarga(stok.jenis, d.ukuran);
+
+            if (harga === null) {
+                throw new Error(
+                    `Harga ${stok.jenis} ukuran ${d.ukuran} belum tersedia. ` +
+                    "Silakan atur harga terlebih dahulu di halaman Stok Bibit."
+                );
+            }
 
             return {
                 sumber: stok.sumber,
@@ -719,12 +848,20 @@ window.simpanData = async function(e) {
                 jenis: stok.jenis,
                 ukuran: d.ukuran,
                 spesifikasi: d.spesifikasi,
-                jumlah: d.jumlah
+                jumlah: d.jumlah,
+
+                // Snapshot harga saat transaksi disimpan.
+                hargaSatuan: harga,
+                totalHarga: harga * d.jumlah
             };
         });
 
         const totalJumlah = items.reduce(
             (sum, item) => sum + item.jumlah, 0
+        );
+
+        const totalNilai = items.reduce(
+            (sum, item) => sum + item.totalHarga, 0
         );
 
         const dataSimpan = {
@@ -733,6 +870,7 @@ window.simpanData = async function(e) {
             sopir,
             items,
             jumlah: totalJumlah,
+            totalHarga: totalNilai,
             timestamp: new Date()
         };
 
@@ -746,7 +884,11 @@ window.simpanData = async function(e) {
                 dataSimpan
             );
 
-            alert("Perubahan distribusi berhasil disimpan.");
+            alert(
+                "Perubahan distribusi berhasil disimpan.\n" +
+                "Harga disimpan sesuai harga terbaru saat perubahan disimpan."
+            );
+
             sedangEditId = null;
 
         } else {
@@ -758,7 +900,8 @@ window.simpanData = async function(e) {
             alert(
                 "Distribusi berhasil disimpan.\n" +
                 "Jumlah batch: " + items.length + "\n" +
-                "Total bibit: " + formatJumlah(totalJumlah)
+                "Total bibit: " + formatJumlah(totalJumlah) + "\n" +
+                "Total nilai: " + formatRupiah(totalNilai)
             );
         }
 
@@ -781,7 +924,6 @@ window.simpanData = async function(e) {
     }
 };
 
-// Inisialisasi.
 const berhasilMuat = await loadDataAwal();
 
 if (berhasilMuat) buatBarisBatch();
@@ -804,23 +946,17 @@ if (berhasilMuat) buatBarisBatch();
     <section class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div class="bg-white p-5 rounded-xl shadow border-l-4 border-emerald-600">
             <p class="text-sm text-slate-500">Total Stok Tersedia</p>
-            <p id="total-tersedia" class="text-2xl font-bold text-emerald-800 mt-1">
-                Memuat...
-            </p>
+            <p id="total-tersedia" class="text-2xl font-bold text-emerald-800 mt-1">Memuat...</p>
         </div>
 
         <div class="bg-white p-5 rounded-xl shadow border-l-4 border-blue-500">
             <p class="text-sm text-slate-500">Total Distribusi Tercatat</p>
-            <p id="total-distribusi" class="text-2xl font-bold text-blue-800 mt-1">
-                Memuat...
-            </p>
+            <p id="total-distribusi" class="text-2xl font-bold text-blue-800 mt-1">Memuat...</p>
         </div>
 
         <div class="bg-white p-5 rounded-xl shadow border-l-4 border-amber-500">
             <p class="text-sm text-slate-500">Batch dengan Stok Tersedia</p>
-            <p id="jumlah-batch" class="text-2xl font-bold text-amber-800 mt-1">
-                Memuat...
-            </p>
+            <p id="jumlah-batch" class="text-2xl font-bold text-amber-800 mt-1">Memuat...</p>
         </div>
     </section>
 
@@ -851,29 +987,27 @@ if (berhasilMuat) buatBarisBatch();
 
                 <div id="daftar-batch" class="space-y-4"></div>
 
-                <div class="bg-emerald-100 rounded-xl p-4 flex justify-between items-center">
-                    <span class="font-semibold text-emerald-900">
-                        Total Bibit Keluar
-                    </span>
-                    <span id="total-form" class="text-xl font-bold text-emerald-800">
-                        0 Bibit
-                    </span>
+                <div class="bg-emerald-100 rounded-xl p-4 space-y-2">
+                    <div class="flex justify-between items-center">
+                        <span class="font-semibold text-emerald-900">Total Bibit Keluar</span>
+                        <span id="total-form" class="text-xl font-bold text-emerald-800">0 Bibit</span>
+                    </div>
+                    <div class="flex justify-between items-center gap-3">
+                        <span class="font-semibold text-emerald-900">Total Nilai Pengiriman</span>
+                        <span id="nilai-total-form" class="text-lg font-bold text-blue-800">Belum lengkap</span>
+                    </div>
                 </div>
             </div>
 
             <div>
-                <label class="block text-sm font-medium">
-                    Proyek / Tujuan Rehab DAS
-                </label>
+                <label class="block text-sm font-medium">Proyek / Tujuan Rehab DAS</label>
                 <input type="text" id="d-tujuan" required
                     placeholder="Sub-DAS Riam Kanan"
                     class="w-full mt-1 p-3 border rounded-xl">
             </div>
 
             <div>
-                <label class="block text-sm font-medium">
-                    Nama Sopir & No. Plat
-                </label>
+                <label class="block text-sm font-medium">Nama Sopir & No. Plat</label>
                 <input type="text" id="d-sopir"
                     placeholder="Bpk. Budi (DA 1234 XY)"
                     class="w-full mt-1 p-3 border rounded-xl">
@@ -894,13 +1028,14 @@ if (berhasilMuat) buatBarisBatch();
     </section>
 
     <section class="bg-white p-6 rounded-2xl shadow">
-        <h3 class="text-lg font-bold text-emerald-900 mb-4">
+        <h3 class="text-lg font-bold text-emerald-900 mb-2">
             Riwayat Distribusi Bibit Keluar (DAS)
         </h3>
 
         <p class="text-xs text-slate-500 mb-3">
-            Satu baris mewakili satu surat jalan. Arahkan kursor ke baris
-            untuk melihat tinggi, spesifikasi, dan informasi sopir.
+            Harga pada riwayat merupakan harga saat transaksi disimpan.
+            Perubahan harga di Stok Bibit tidak mengubah transaksi lama.
+            Arahkan kursor ke baris untuk melihat tinggi, spesifikasi, dan sopir.
         </p>
 
         <div class="overflow-x-auto">
@@ -913,6 +1048,8 @@ if (berhasilMuat) buatBarisBatch();
                         <th class="p-3">Sumber - Batch</th>
                         <th class="p-3">Jenis</th>
                         <th class="p-3">Jumlah Keluar</th>
+                        <th class="p-3">Harga / Bibit</th>
+                        <th class="p-3">Nilai Pengiriman</th>
                         <th class="p-3">Tujuan</th>
                         <th class="p-3">Aksi</th>
                     </tr>
@@ -920,7 +1057,7 @@ if (berhasilMuat) buatBarisBatch();
 
                 <tbody id="tabel-data">
                     <tr>
-                        <td colspan="8" class="p-4 text-center text-slate-400">
+                        <td colspan="10" class="p-4 text-center text-slate-400">
                             Memuat data...
                         </td>
                     </tr>
