@@ -1,4 +1,4 @@
-
+```html
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -15,7 +15,10 @@
             addDoc,
             getDocs,
             query,
-            orderBy
+            orderBy,
+            doc,
+            updateDoc,
+            deleteDoc
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         if (!(await requireAuth())) {
@@ -25,11 +28,14 @@
         const formCabutan = document.getElementById("form-cabutan");
         const tabelData = document.getElementById("tabel-data");
         const tombolSimpan = document.getElementById("tombol-simpan");
+        const tombolBatal = document.getElementById("tombol-batal");
+        const judulForm = document.getElementById("judul-form");
 
         let dataCabutan = [];
         let totalMedia = 0;
         let totalSapih = 0;
         let totalCabutan = 0;
+        let editingId = null;
 
         const angka = (nilai) =>
             (Number(nilai) || 0).toLocaleString("id-ID");
@@ -77,7 +83,7 @@
             try {
                 tabelData.innerHTML = `
                     <tr>
-                        <td colspan="8" class="p-4 text-center text-slate-400">
+                        <td colspan="9" class="p-4 text-center text-slate-400">
                             Memuat data...
                         </td>
                     </tr>
@@ -97,25 +103,25 @@
                 ]);
 
                 totalMedia = snapMedia.docs.reduce(
-                    (total, doc) =>
-                        total + (Number(doc.data().jumlah) || 0),
+                    (total, item) =>
+                        total + (Number(item.data().jumlah) || 0),
                     0
                 );
 
                 totalSapih = snapSapih.docs.reduce(
-                    (total, doc) =>
-                        total + (Number(doc.data().jumlah) || 0),
+                    (total, item) =>
+                        total + (Number(item.data().jumlah) || 0),
                     0
                 );
 
-                dataCabutan = snapCabutan.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
+                dataCabutan = snapCabutan.docs.map(item => ({
+                    id: item.id,
+                    ...item.data()
                 }));
 
                 totalCabutan = dataCabutan.reduce(
-                    (total, d) =>
-                        total + (Number(d.jumlah) || 0),
+                    (total, item) =>
+                        total + (Number(item.jumlah) || 0),
                     0
                 );
 
@@ -127,7 +133,7 @@
 
                 tabelData.innerHTML = `
                     <tr>
-                        <td colspan="8" class="p-4 text-center text-red-600">
+                        <td colspan="9" class="p-4 text-center text-red-600">
                             Gagal memuat data: ${error.message}
                         </td>
                     </tr>
@@ -147,7 +153,7 @@
             if (dataCabutan.length === 0) {
                 tabelData.innerHTML = `
                     <tr>
-                        <td colspan="8" class="p-4 text-center text-slate-400">
+                        <td colspan="9" class="p-4 text-center text-slate-400">
                             Belum ada data cabutan.
                         </td>
                     </tr>
@@ -193,12 +199,143 @@
                     tr.appendChild(td);
                 });
 
+                // Kolom tombol aksi
+                const tdAksi = document.createElement("td");
+                tdAksi.className = "p-3 whitespace-nowrap";
+
+                const tombolEdit = document.createElement("button");
+                tombolEdit.type = "button";
+                tombolEdit.textContent = "Edit";
+                tombolEdit.className =
+                    "bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium mr-2";
+                tombolEdit.addEventListener("click", () => {
+                    editCabutan(d.id);
+                });
+
+                const tombolHapus = document.createElement("button");
+                tombolHapus.type = "button";
+                tombolHapus.textContent = "Hapus";
+                tombolHapus.className =
+                    "bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium";
+                tombolHapus.addEventListener("click", () => {
+                    hapusCabutan(d.id);
+                });
+
+                tdAksi.appendChild(tombolEdit);
+                tdAksi.appendChild(tombolHapus);
+                tr.appendChild(tdAksi);
+
                 tabelData.appendChild(tr);
             });
         }
 
         // ==========================================
-        // SIMPAN DATA CABUTAN
+        // EDIT DATA CABUTAN
+        // ==========================================
+
+        function editCabutan(id) {
+            const data = dataCabutan.find(item => item.id === id);
+
+            if (!data) {
+                alert("Data cabutan tidak ditemukan.");
+                return;
+            }
+
+            editingId = id;
+
+            document.getElementById("c-batch").value =
+                data.batch || "";
+
+            document.getElementById("c-jenis").value =
+                data.jenis || "";
+
+            document.getElementById("c-ukuran").value =
+                data.ukuran || "";
+
+            document.getElementById("c-tanggal").value =
+                data.tanggal || "";
+
+            document.getElementById("c-jumlah").value =
+                data.jumlah || "";
+
+            document.getElementById("c-asal").value =
+                data.asal || "";
+
+            document.getElementById("c-lokasi").value =
+                data.lokasi || "";
+
+            document.getElementById("c-keterangan").value =
+                data.keterangan || "";
+
+            judulForm.textContent = "Edit Data Cabutan Bibit";
+            tombolSimpan.textContent = "Simpan Perubahan";
+            tombolBatal.classList.remove("hidden");
+
+            document.getElementById("form-cabutan").scrollIntoView({
+                behavior: "smooth",
+                block: "start"
+            });
+        }
+
+        // ==========================================
+        // BATAL EDIT
+        // ==========================================
+
+        function batalEdit() {
+            editingId = null;
+            formCabutan.reset();
+
+            judulForm.textContent =
+                "Pencatatan Bibit dari Cabutan Alam";
+
+            tombolSimpan.textContent = "Simpan Data Cabutan";
+            tombolBatal.classList.add("hidden");
+        }
+
+        tombolBatal.addEventListener("click", batalEdit);
+
+        // ==========================================
+        // HAPUS DATA CABUTAN
+        // ==========================================
+
+        async function hapusCabutan(id) {
+            const data = dataCabutan.find(item => item.id === id);
+
+            if (!data) {
+                alert("Data cabutan tidak ditemukan.");
+                return;
+            }
+
+            const konfirmasi = confirm(
+                `Apakah Anda yakin ingin menghapus data cabutan berikut?\n\n` +
+                `Batch: ${data.batch || "-"}\n` +
+                `Jenis: ${data.jenis || "-"}\n` +
+                `Tanggal: ${data.tanggal || "-"}\n` +
+                `Jumlah: ${angka(data.jumlah)} bibit\n\n` +
+                `Data yang dihapus tidak dapat dikembalikan.`
+            );
+
+            if (!konfirmasi) return;
+
+            try {
+                await deleteDoc(doc(db, "cabutan_bibit", id));
+
+                if (editingId === id) {
+                    batalEdit();
+                }
+
+                alert("Data cabutan berhasil dihapus.");
+
+                await muatData();
+
+            } catch (error) {
+                console.error("Gagal menghapus data cabutan:", error);
+                alert("Gagal menghapus data: " + error.message);
+            }
+        }
+
+        // ==========================================
+        // SIMPAN DATA BARU / PERUBAHAN CABUTAN
         // ==========================================
 
         formCabutan.addEventListener("submit", async function(e) {
@@ -239,15 +376,36 @@
                 return;
             }
 
+            const dataSimpan = {
+                batch: batch,
+                jenis: jenis,
+                ukuran: ukuran,
+                tanggal: tanggal,
+                asal: asal,
+                jumlah: jumlah,
+                lokasi: lokasi,
+                keterangan: keterangan,
+                sumber: "Cabutan"
+            };
+
             tombolSimpan.disabled = true;
+            tombolBatal.disabled = true;
             tombolSimpan.textContent = "Memeriksa stok...";
 
             try {
                 // Membaca ulang stok terbaru sebelum menyimpan.
                 await muatData();
 
+                // Saat edit, jumlah lama pada dokumen yang sama
+                // tidak boleh dihitung sebagai pemakaian tambahan.
+                const jumlahLama = editingId
+                    ? Number(
+                        dataCabutan.find(item => item.id === editingId)?.jumlah
+                    ) || 0
+                    : 0;
+
                 const sisaMedia =
-                    totalMedia - totalSapih - totalCabutan;
+                    totalMedia - totalSapih - totalCabutan + jumlahLama;
 
                 if (sisaMedia < 0) {
                     alert(
@@ -261,31 +419,35 @@
                         `Stok polybag bermedia tidak mencukupi.\n\n` +
                         `Total media terisi: ${angka(totalMedia)}\n` +
                         `Digunakan penyapihan: ${angka(totalSapih)}\n` +
-                        `Digunakan cabutan: ${angka(totalCabutan)}\n` +
+                        `Digunakan cabutan lainnya: ${angka(totalCabutan - jumlahLama)}\n` +
                         `Sisa polybag bermedia: ${angka(sisaMedia)}\n\n` +
                         `Jumlah cabutan yang dimasukkan: ${angka(jumlah)}`
                     );
                     return;
                 }
 
-                tombolSimpan.textContent = "Menyimpan...";
+                if (editingId) {
+                    tombolSimpan.textContent = "Memperbarui...";
 
-                await addDoc(collection(db, "cabutan_bibit"), {
-                    batch: batch,
-                    jenis: jenis,
-                    ukuran: ukuran,
-                    tanggal: tanggal,
-                    asal: asal,
-                    jumlah: jumlah,
-                    lokasi: lokasi,
-                    keterangan: keterangan,
-                    sumber: "Cabutan",
-                    timestamp: new Date()
-                });
+                    await updateDoc(
+                        doc(db, "cabutan_bibit", editingId),
+                        dataSimpan
+                    );
 
-                alert("Data sumber benih cabutan berhasil disimpan.");
+                    alert("Data cabutan berhasil diperbarui.");
 
-                formCabutan.reset();
+                } else {
+                    tombolSimpan.textContent = "Menyimpan...";
+
+                    await addDoc(collection(db, "cabutan_bibit"), {
+                        ...dataSimpan,
+                        timestamp: new Date()
+                    });
+
+                    alert("Data sumber benih cabutan berhasil disimpan.");
+                }
+
+                batalEdit();
 
                 // Memperbarui ringkasan dan riwayat tanpa reload.
                 await muatData();
@@ -297,7 +459,13 @@
 
             } finally {
                 tombolSimpan.disabled = false;
-                tombolSimpan.textContent = "Simpan Data Cabutan";
+                tombolBatal.disabled = false;
+
+                if (editingId) {
+                    tombolSimpan.textContent = "Simpan Perubahan";
+                } else {
+                    tombolSimpan.textContent = "Simpan Data Cabutan";
+                }
             }
         });
 
@@ -372,7 +540,7 @@
         <!-- FORM CABUTAN -->
         <section class="bg-white p-6 rounded-2xl shadow">
 
-            <h2 class="text-xl font-bold text-emerald-900 mb-4">
+            <h2 id="judul-form" class="text-xl font-bold text-emerald-900 mb-4">
                 Pencatatan Bibit dari Cabutan Alam
             </h2>
 
@@ -468,10 +636,15 @@
                         placeholder="Kondisi bibit, kegiatan aklimatisasi, dan catatan lainnya"></textarea>
                 </div>
 
-                <div class="md:col-span-2">
+                <div class="md:col-span-2 flex flex-col sm:flex-row gap-2">
                     <button id="tombol-simpan" type="submit"
-                        class="w-full bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium cursor-pointer disabled:opacity-50">
+                        class="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium cursor-pointer disabled:opacity-50">
                         Simpan Data Cabutan
+                    </button>
+
+                    <button id="tombol-batal" type="button"
+                        class="hidden bg-slate-500 hover:bg-slate-600 text-white px-6 p-3 rounded-xl font-medium cursor-pointer">
+                        Batal Edit
                     </button>
                 </div>
 
@@ -498,12 +671,13 @@
                             <th class="p-3">Asal Cabutan</th>
                             <th class="p-3">Jumlah</th>
                             <th class="p-3">Bedeng</th>
+                            <th class="p-3">Aksi</th>
                         </tr>
                     </thead>
 
                     <tbody id="tabel-data">
                         <tr>
-                            <td colspan="8"
+                            <td colspan="9"
                                 class="p-4 text-center text-slate-400">
                                 Memuat data...
                             </td>
@@ -518,3 +692,4 @@
 
 </body>
 </html>
+```
