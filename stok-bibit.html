@@ -216,7 +216,13 @@
 
                 opname.forEach((x) => {
                     const d = x.data();
-                    const sumber = d.sumber || "Belum tercatat";
+                    const sumberAsli = d.sumber || "Belum tercatat";
+                    // Opname lama menyimpan "Penyapihan"; samakan dengan
+                    // sumber stok penyapihan ("Media tabur").
+                    const sumber =
+                        normal(sumberAsli) === "penyapihan"
+                            ? "Media tabur"
+                            : sumberAsli;
                     const batch = d.batch || "-";
                     const key = keyBatch(sumber, batch);
                     const waktu = waktuMillis(d.timestamp);
