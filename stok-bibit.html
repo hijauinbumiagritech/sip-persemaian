@@ -1,3 +1,4 @@
+```html
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -28,13 +29,22 @@
             }).format(n || 0);
 
         const normal = (v) =>
-            String(v || "").trim().toLowerCase().replace(/\s+/g, " ");
+            String(v || "")
+                .trim()
+                .toLowerCase()
+                .replace(/\s+/g, " ");
 
+        // Harga hanya berdasarkan jenis + ukuran, bukan batch.
         const keyHarga = (jenis, ukuran) =>
             normal(jenis) + "__" + normal(ukuran);
 
+        // Stok keluar hanya berdasarkan sumber + batch.
         const keyBatch = (sumber, batch) =>
             normal(sumber) + "|" + normal(batch);
+
+        // Baris stok masuk dikelompokkan berdasarkan sumber + batch + ukuran.
+        const keyStok = (sumber, batch, ukuran) =>
+            keyBatch(sumber, batch) + "|" + normal(ukuran);
 
         function waktuMillis(timestamp) {
             if (!timestamp) return 0;
@@ -84,79 +94,124 @@
                     getDocs(collection(db, "opname_fisik"))
                 ]);
 
-                // Pemetaan jenis tanaman berdasarkan batch tabur.
+                // Pemetaan jenis tanaman berdasarkan kode batch tabur.
                 const jenisBatch = {};
 
                 tabur.forEach((x) => {
                     const d = x.data();
 
                     if (d.kode) {
-                        jenisBatch[d.kode] =
+                        jenisBatch[normal(d.kode)] =
                             d.jenis || "Tidak diketahui";
                     }
                 });
 
-                // Pengelompokan stok berdasarkan sumber, batch, dan ukuran.
                 const map = {};
+                const rekapBatch = {};
 
-                const tambah = (
+                function pastikanBatch(sumber, batch, jenis = "") {
+                    const sumberFinal = sumber || "Media tabur";
+                    const batchFinal = batch || "-";
+                    const key = keyBatch(sumberFinal, batchFinal);
+
+                    if (!rekapBatch[key]) {
+                        rekapBatch[key] = {
+                            sumber: sumberFinal,
+                            batch: batchFinal,
+                            jenis:
+                                jenis ||
+                                jenisBatch[normal(batchFinal)] ||
+                                "Tidak diketahui",
+                            masuk: 0,
+                            keluar: 0,
+                            stok: 0,
+                            nilai: 0,
+                            hargaRataRata: 0
+                        };
+                    }
+
+                    if (
+                        jenis &&
+                        rekapBatch[key].jenis === "Tidak diketahui"
+                    ) {
+                        rekapBatch[key].jenis = jenis;
+                    }
+
+                    return rekapBatch[key];
+                }
+
+                function tambahMasuk(
                     sumber,
                     batch,
                     jenis,
                     ukuran,
                     jumlah,
                     lokasi = ""
-                ) => {
+                ) {
                     const sumberFinal = sumber || "Media tabur";
                     const batchFinal = batch || "-";
                     const ukuranFinal = ukuran || "Belum dicatat";
+                    const jenisFinal =
+                        jenis ||
+                        jenisBatch[normal(batchFinal)] ||
+                        "Tidak diketahui";
 
-                    const key =
-                        sumberFinal + "|" +
-                        batchFinal + "|" +
-                        ukuranFinal;
+                    const key = keyStok(
+                        sumberFinal,
+                        batchFinal,
+                        ukuranFinal
+                    );
+
+                    const batchData = pastikanBatch(
+                        sumberFinal,
+                        batchFinal,
+                        jenisFinal
+                    );
 
                     if (!map[key]) {
                         map[key] = {
                             sumber: sumberFinal,
                             batch: batchFinal,
-                            jenis:
-                                jenis ||
-                                jenisBatch[batchFinal] ||
-                                "Tidak diketahui",
+                            jenis: jenisFinal,
                             ukuran: ukuranFinal,
                             masuk: 0,
-                            keluar: 0,
-                            lokasi
+                            lokasi: ""
                         };
                     }
 
-                    map[key].masuk += Number(jumlah || 0);
+                    const jumlahFinal = Number(jumlah || 0);
 
-                    if (jenis) map[key].jenis = jenis;
-                    if (ukuran) map[key].ukuran = ukuran;
-                    if (lokasi) map[key].lokasi = lokasi;
-                };
+                    map[key].masuk += jumlahFinal;
+                    batchData.masuk += jumlahFinal;
 
-                // Bibit hasil penyapihan.
+                    if (jenisFinal) {
+                        map[key].jenis = jenisFinal;
+                    }
+
+                    if (lokasi) {
+                        map[key].lokasi = lokasi;
+                    }
+                }
+
+                // 1. Bibit hasil penyapihan.
                 sapih.forEach((x) => {
                     const d = x.data();
 
-                    tambah(
+                    tambahMasuk(
                         "Media tabur",
                         d.batch,
-                        d.jenis || jenisBatch[d.batch],
+                        d.jenis || jenisBatch[normal(d.batch)],
                         d.ukuran,
                         d.jumlah,
                         d.lokasi
                     );
                 });
 
-                // Bibit hasil cabutan.
+                // 2. Bibit hasil cabutan.
                 cabutan.forEach((x) => {
                     const d = x.data();
 
-                    tambah(
+                    tambahMasuk(
                         "Cabutan",
                         d.batch,
                         d.jenis,
@@ -166,49 +221,83 @@
                     );
                 });
 
-                // Mengurangi stok berdasarkan distribusi.
+                // 3. Distribusi: mendukung format baru multi-batch
+                //    dan format lama satu batch.
                 distribusi.forEach((x) => {
                     const d = x.data();
 
-                    const sumber = d.sumber || "Media tabur";
-                    const batch = d.batch || "-";
-                    const ukuran = d.ukuran || "Belum dicatat";
+                    let rincian = [];
 
-                    const key = sumber + "|" + batch + "|" + ukuran;
+                    if (Array.isArray(d.items) && d.items.length > 0) {
+                        // Format baru:
+                        // satu dokumen distribusi berisi banyak batch.
+                        rincian = d.items;
+                    } else if (d.batch) {
+                        // Format lama:
+                        // satu dokumen distribusi berisi satu batch.
+                        rincian = [{
+                            sumber: d.sumber || "Media tabur",
+                            batch: d.batch,
+                            jenis: d.jenis,
+                            ukuran: d.ukuran,
+                            jumlah: d.jumlah
+                        }];
+                    }
 
-                    if (!map[key]) {
-                        map[key] = {
+                    rincian.forEach((item) => {
+                        const sumber = item.sumber || "Media tabur";
+                        const batch = item.batch || "-";
+                        const jenis =
+                            item.jenis ||
+                            jenisBatch[normal(batch)] ||
+                            "Tidak diketahui";
+
+                        const jumlah = Number(item.jumlah || 0);
+
+                        if (!Number.isFinite(jumlah) || jumlah <= 0) {
+                            return;
+                        }
+
+                        const batchData = pastikanBatch(
                             sumber,
                             batch,
-                            jenis:
-                                d.jenis ||
-                                jenisBatch[batch] ||
-                                "Tidak diketahui",
-                            ukuran,
-                            masuk: 0,
-                            keluar: 0,
-                            lokasi: ""
-                        };
-                    }
+                            jenis
+                        );
 
-                    map[key].keluar += Number(d.jumlah || 0);
-
-                    if (d.jenis) {
-                        map[key].jenis = d.jenis;
-                    }
+                        // Pengurangan tidak menggunakan ukuran.
+                        // Ukuran pada distribusi hanya menjadi keterangan.
+                        batchData.keluar += jumlah;
+                    });
                 });
 
-                // Harga berdasarkan jenis dan ukuran bibit.
+                // 4. Hitung stok akhir per sumber + batch.
+                Object.values(rekapBatch).forEach((b) => {
+                    b.stok = b.masuk - b.keluar;
+                });
+
+                // 5. Harga berdasarkan jenis + ukuran.
+                // Jika ada data harga ganda dari data lama,
+                // gunakan catatan dengan timestamp terbaru.
                 const hargaMap = {};
 
                 harga.forEach((x) => {
                     const d = x.data();
+                    const key = keyHarga(d.jenis, d.ukuran);
+                    const waktu = waktuMillis(d.timestamp);
 
-                    hargaMap[keyHarga(d.jenis, d.ukuran)] =
-                        Number(d.harga || 0);
+                    if (
+                        !hargaMap[key] ||
+                        waktu >= hargaMap[key].waktu
+                    ) {
+                        hargaMap[key] = {
+                            harga: Number(d.harga || 0),
+                            waktu,
+                            data: d
+                        };
+                    }
                 });
 
-                // Mengambil opname fisik TERBARU per sumber dan batch.
+                // 6. Ambil opname fisik terbaru per sumber + batch.
                 const opnameTerbaru = {};
 
                 opname.forEach((x) => {
@@ -230,61 +319,109 @@
                     }
                 });
 
-                // Perhitungan stok buku dan nilai persediaan.
+                // 7. Hitung harga rata-rata tertimbang per batch.
+                // Nilai stok adalah estimasi karena distribusi
+                // mengurangi stok pada tingkat batch, bukan ukuran.
+                Object.values(rekapBatch).forEach((b) => {
+                    let totalNilaiMasuk = 0;
+
+                    Object.values(map)
+                        .filter((r) =>
+                            keyBatch(r.sumber, r.batch) ===
+                            keyBatch(b.sumber, b.batch)
+                        )
+                        .forEach((r) => {
+                            const hargaData =
+                                hargaMap[keyHarga(r.jenis, r.ukuran)];
+
+                            const hargaBibit = hargaData
+                                ? hargaData.harga
+                                : 0;
+
+                            totalNilaiMasuk +=
+                                r.masuk * hargaBibit;
+                        });
+
+                    b.hargaRataRata =
+                        b.masuk > 0
+                            ? totalNilaiMasuk / b.masuk
+                            : 0;
+
+                    b.nilai =
+                        Math.max(0, b.stok) * b.hargaRataRata;
+                });
+
+                // 8. Siapkan baris stok per ukuran.
                 const rows = Object.values(map).map((d) => {
-                    const stok = d.masuk - d.keluar;
-                    const hargaBibit =
-                        hargaMap[keyHarga(d.jenis, d.ukuran)] || 0;
+                    const hargaData =
+                        hargaMap[keyHarga(d.jenis, d.ukuran)];
 
                     return {
                         ...d,
-                        stok,
-                        harga: hargaBibit,
-                        nilai: Math.max(0, stok) * hargaBibit
+                        harga: hargaData
+                            ? hargaData.harga
+                            : 0
                     };
                 });
 
-                // Rekap stok buku pada tingkat sumber dan batch.
-                const rekapBatch = {};
+                // Batch yang hanya memiliki data distribusi,
+                // tetapi tidak memiliki data stok masuk.
+                const batchDenganBaris = new Set(
+                    rows.map((r) => keyBatch(r.sumber, r.batch))
+                );
 
-                rows.forEach((d) => {
-                    const key = keyBatch(d.sumber, d.batch);
+                Object.values(rekapBatch).forEach((b) => {
+                    const key = keyBatch(b.sumber, b.batch);
 
-                    if (!rekapBatch[key]) {
-                        rekapBatch[key] = {
+                    if (!batchDenganBaris.has(key)) {
+                        rows.push({
+                            sumber: b.sumber,
+                            batch: b.batch,
+                            jenis: b.jenis,
+                            ukuran: "Belum ada rincian stok masuk",
                             masuk: 0,
-                            keluar: 0,
-                            stok: 0
-                        };
+                            lokasi: "",
+                            harga: 0
+                        });
                     }
-
-                    rekapBatch[key].masuk += d.masuk;
-                    rekapBatch[key].keluar += d.keluar;
-                    rekapBatch[key].stok += d.stok;
                 });
 
-                const totalStok = rows.reduce(
-                    (total, d) => total + Math.max(0, d.stok),
+                // Urutkan agar baris satu batch berdekatan.
+                rows.sort((a, b) => {
+                    const batchCompare =
+                        keyBatch(a.sumber, a.batch).localeCompare(
+                            keyBatch(b.sumber, b.batch)
+                        );
+
+                    if (batchCompare !== 0) {
+                        return batchCompare;
+                    }
+
+                    return normal(a.ukuran).localeCompare(
+                        normal(b.ukuran)
+                    );
+                });
+
+                const totalStok = Object.values(rekapBatch).reduce(
+                    (total, b) =>
+                        total + Math.max(0, b.stok),
                     0
                 );
 
-                const totalNilai = rows.reduce(
-                    (total, d) => total + d.nilai,
+                const totalNilai = Object.values(rekapBatch).reduce(
+                    (total, b) => total + b.nilai,
                     0
                 );
 
-                const totalMasuk = rows.reduce(
-                    (total, d) => total + d.masuk,
+                const totalMasuk = Object.values(rekapBatch).reduce(
+                    (total, b) => total + b.masuk,
                     0
                 );
 
-                const totalKeluar = rows.reduce(
-                    (total, d) => total + d.keluar,
+                const totalKeluar = Object.values(rekapBatch).reduce(
+                    (total, b) => total + b.keluar,
                     0
                 );
-
-                const jumlahBatchOpname =
-                    Object.keys(opnameTerbaru).length;
 
                 document.getElementById("total-stok").textContent =
                     totalStok.toLocaleString("id-ID") + " Bibit";
@@ -299,20 +436,24 @@
                     totalKeluar.toLocaleString("id-ID") + " Bibit";
 
                 document.getElementById("total-opname").textContent =
-                    jumlahBatchOpname.toLocaleString("id-ID") + " Batch";
+                    Object.keys(opnameTerbaru).length.toLocaleString("id-ID") +
+                    " Batch";
 
-                // Menampilkan tabel stok.
+                // 9. Tampilkan tabel stok.
                 tbody.innerHTML = "";
 
                 if (rows.length === 0) {
                     const tr = document.createElement("tr");
+
                     buatSel(
                         tr,
                         "Belum ada data stok bibit.",
                         "text-center text-slate-400"
                     ).colSpan = 12;
+
                     tbody.appendChild(tr);
                 } else {
+                    const batchSudahDitampilkan = new Set();
                     const opnameSudahDitampilkan = new Set();
 
                     rows.forEach((d, i) => {
@@ -324,36 +465,49 @@
                         const batchInfo = rekapBatch[key];
                         const opnameData = opnameTerbaru[key];
 
+                        const pertama =
+                            !batchSudahDitampilkan.has(key);
+
                         buatSel(tr, i + 1);
                         buatSel(tr, d.sumber);
                         buatSel(tr, d.batch, "font-medium");
                         buatSel(tr, d.jenis);
                         buatSel(tr, d.ukuran);
+
                         buatSel(
                             tr,
                             d.masuk.toLocaleString("id-ID")
                         );
-                        buatSel(
-                            tr,
-                            d.keluar.toLocaleString("id-ID")
-                        );
 
-                        const stokCell = buatSel(
-                            tr,
-                            d.stok.toLocaleString("id-ID"),
-                            "font-bold " +
-                            (d.stok < 0
-                                ? "text-red-700"
-                                : "text-emerald-700")
-                        );
+                        // Keluar dan stok sisa hanya ditampilkan
+                        // satu kali untuk setiap batch.
+                        if (pertama) {
+                            buatSel(
+                                tr,
+                                batchInfo.keluar.toLocaleString("id-ID")
+                            );
 
-                        if (d.stok < 0) {
-                            stokCell.title =
-                                "Jumlah distribusi melebihi jumlah bibit masuk.";
+                            const stokCell = buatSel(
+                                tr,
+                                batchInfo.stok.toLocaleString("id-ID"),
+                                "font-bold " +
+                                (batchInfo.stok < 0
+                                    ? "text-red-700"
+                                    : "text-emerald-700")
+                            );
+
+                            if (batchInfo.stok < 0) {
+                                stokCell.title =
+                                    "Jumlah distribusi melebihi stok masuk batch.";
+                            }
+                        } else {
+                            buatSel(tr, "-");
+                            buatSel(tr, "-");
                         }
 
                         // Opname ditampilkan satu kali per batch.
                         if (
+                            pertama &&
                             opnameData &&
                             !opnameSudahDitampilkan.has(key)
                         ) {
@@ -381,39 +535,67 @@
                             buatSel(tr, "-");
                         }
 
+                        // Harga tetap ditampilkan per jenis + ukuran.
                         buatSel(
                             tr,
-                            d.harga ? rupiah(d.harga) : "Belum diatur"
+                            d.harga > 0
+                                ? rupiah(d.harga)
+                                : "Belum diatur"
                         );
 
-                        buatSel(tr, rupiah(d.nilai));
+                        // Nilai persediaan batch ditampilkan satu kali.
+                        // Menggunakan harga rata-rata tertimbang.
+                        if (pertama) {
+                            buatSel(
+                                tr,
+                                rupiah(batchInfo.nilai),
+                                "font-semibold"
+                            );
+                        } else {
+                            buatSel(tr, "-");
+                        }
 
+                        batchSudahDitampilkan.add(key);
                         tbody.appendChild(tr);
                     });
                 }
 
-                // Menampilkan tabel harga.
+                // 10. Tampilkan daftar harga.
                 tbodyHarga.innerHTML = "";
 
-                if (harga.empty) {
+                const daftarHarga = Object.values(hargaMap)
+                    .map((x) => x.data)
+                    .sort((a, b) => {
+                        const jenisCompare =
+                            normal(a.jenis).localeCompare(normal(b.jenis));
+
+                        if (jenisCompare !== 0) {
+                            return jenisCompare;
+                        }
+
+                        return normal(a.ukuran).localeCompare(
+                            normal(b.ukuran)
+                        );
+                    });
+
+                if (daftarHarga.length === 0) {
                     const tr = document.createElement("tr");
+
                     buatSel(
                         tr,
                         "Harga belum diatur.",
                         "text-center text-slate-400"
                     ).colSpan = 6;
+
                     tbodyHarga.appendChild(tr);
                 } else {
-                    let no = 1;
-
-                    harga.forEach((x) => {
-                        const d = x.data();
+                    daftarHarga.forEach((d, i) => {
                         const tr = document.createElement("tr");
 
                         tr.className =
                             "border-b hover:bg-emerald-50";
 
-                        buatSel(tr, no++);
+                        buatSel(tr, i + 1);
                         buatSel(tr, d.jenis);
                         buatSel(tr, d.ukuran);
                         buatSel(
@@ -444,6 +626,7 @@
                 tbody.innerHTML = "";
 
                 const tr = document.createElement("tr");
+
                 buatSel(
                     tr,
                     "Gagal memuat stok: " + error.message,
@@ -455,6 +638,7 @@
                 tbodyHarga.innerHTML = "";
 
                 const trHarga = document.createElement("tr");
+
                 buatSel(
                     trHarga,
                     "Gagal memuat harga: " + error.message,
@@ -465,10 +649,9 @@
             }
         }
 
-        // Memuat data setelah autentikasi berhasil.
         await muatData();
 
-        // Menyimpan atau memperbarui harga bibit.
+        // Simpan/perbarui harga berdasarkan jenis + ukuran.
         window.simpanHarga = async function(e) {
             e.preventDefault();
 
@@ -505,6 +688,8 @@
             tombol.textContent = "Menyimpan...";
 
             try {
+                // ID dokumen ditentukan dari jenis + ukuran.
+                // Batch tidak menjadi bagian dari ID harga.
                 const id = keyHarga(jenis, ukuran)
                     .replace(/[^a-z0-9_]+/g, "-")
                     .replace(/^-|-$/g, "");
@@ -522,11 +707,11 @@
                 );
 
                 alert(
-                    "Harga bibit berhasil disimpan atau diperbarui."
+                    "Harga berhasil disimpan. Harga ini berlaku " +
+                    "untuk semua batch dengan jenis dan ukuran yang sama."
                 );
 
                 form.reset();
-
                 await muatData();
 
             } catch (err) {
@@ -610,22 +795,30 @@
 
             <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5 text-sm text-blue-900">
                 <p class="font-semibold mb-1">Keterangan perhitungan stok</p>
+
                 <p>
-                    Stok buku dihitung dari jumlah bibit hasil penyapihan
-                    dan cabutan dikurangi distribusi. Opname fisik
-                    ditampilkan sebagai pembanding berdasarkan sumber
-                    dan batch, menggunakan catatan opname terbaru.
+                    Stok masuk ditampilkan berdasarkan sumber, batch,
+                    dan ukuran. Stok keluar serta stok sisa dihitung
+                    berdasarkan sumber dan batch, sesuai aturan distribusi.
                 </p>
+
                 <p class="mt-2">
-                    Selisih positif berarti jumlah fisik lebih banyak
-                    daripada stok buku. Selisih negatif berarti jumlah
-                    fisik lebih sedikit daripada stok buku.
+                    Harga per bibit mengikuti kombinasi jenis tanaman
+                    dan ukuran. Harga yang sama berlaku untuk semua
+                    batch dengan jenis dan ukuran yang sama.
                 </p>
+
                 <p class="mt-2">
-                    Jika satu batch memiliki beberapa ukuran bibit,
-                    jumlah opname hanya ditampilkan satu kali pada batch
-                    tersebut karena data opname saat ini belum mencatat
-                    rincian ukuran.
+                    Karena distribusi mengurangi stok pada tingkat batch
+                    dan tidak membagi pengurangan berdasarkan ukuran,
+                    nilai persediaan merupakan estimasi menggunakan
+                    harga rata-rata tertimbang ukuran bibit yang masuk
+                    pada batch tersebut.
+                </p>
+
+                <p class="mt-2">
+                    Opname fisik ditampilkan satu kali per batch,
+                    menggunakan catatan opname terbaru.
                 </p>
             </div>
 
@@ -651,8 +844,7 @@
 
                     <tbody id="tabel-stok">
                         <tr>
-                            <td colspan="12"
-                                class="p-4 text-center">
+                            <td colspan="12" class="p-4 text-center">
                                 Memuat data...
                             </td>
                         </tr>
@@ -777,3 +969,4 @@
 
 </body>
 </html>
+```
