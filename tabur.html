@@ -1,4 +1,4 @@
-
+```html
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -12,7 +12,9 @@
         import {
             collection,
             addDoc,
-            getDocs
+            getDocs,
+            deleteDoc,
+            doc
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         if (!(await requireAuth())) {
@@ -21,12 +23,12 @@
 
         const tabelData = document.getElementById("tabel-data");
         const tombolSimpan = document.getElementById("tombol-simpan");
+        const escapeHtml = v => String(v ?? "").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
-        // Memuat riwayat tabur benih
         async function muatTabel() {
             tabelData.innerHTML = `
                 <tr>
-                    <td colspan="5" class="p-4 text-center text-slate-400">
+                    <td colspan="6" class="p-4 text-center text-slate-400">
                         Memuat data...
                     </td>
                 </tr>
@@ -42,7 +44,7 @@
                 if (querySnapshot.empty) {
                     tabelData.innerHTML = `
                         <tr>
-                            <td colspan="5" class="p-4 text-center text-slate-400">
+                            <td colspan="6" class="p-4 text-center text-slate-400">
                                 Belum ada data tabur benih.
                             </td>
                         </tr>
@@ -52,11 +54,19 @@
 
                 const data = [];
 
-                querySnapshot.forEach((doc) => {
-                    data.push(doc.data());
+                querySnapshot.forEach((snap) => {
+                    data.push({ id: snap.id, ...snap.data() });
                 });
 
-                // Urutkan berdasarkan tanggal terbaru
+                const kodeLama = [...new Set(data.map(x => x.kode).filter(Boolean))];
+                const jenisLama = [...new Set(data.map(x => x.jenis).filter(Boolean))];
+
+                document.getElementById("pilihan-kode").innerHTML =
+                    kodeLama.map(x => `<option value="${escapeHtml(x)}"></option>`).join("");
+
+                document.getElementById("pilihan-jenis").innerHTML =
+                    jenisLama.map(x => `<option value="${escapeHtml(x)}"></option>`).join("");
+
                 data.sort((a, b) => {
                     return String(b.tanggal || "").localeCompare(
                         String(a.tanggal || "")
@@ -79,21 +89,26 @@
                         const td = document.createElement("td");
                         td.className = "p-3";
 
-                        if (kolom === 1) {
-                            td.classList.add("font-medium");
-                        }
+                        if (kolom === 1) td.classList.add("font-medium");
 
                         if (kolom === 4) {
-                            td.classList.add(
-                                "font-semibold",
-                                "text-emerald-700"
-                            );
+                            td.classList.add("font-semibold", "text-emerald-700");
                         }
 
                         td.textContent = isi;
                         tr.appendChild(td);
                     });
 
+                    const aksi = document.createElement("td");
+                    aksi.className = "p-3";
+
+                    const btn = document.createElement("button");
+                    btn.textContent = "Hapus";
+                    btn.className = "text-red-700 font-semibold";
+                    btn.addEventListener("click", () => hapusTabur(d.id, d.kode));
+
+                    aksi.appendChild(btn);
+                    tr.appendChild(aksi);
                     tabelData.appendChild(tr);
                 });
 
@@ -102,7 +117,7 @@
 
                 tabelData.innerHTML = `
                     <tr>
-                        <td colspan="5" class="p-4 text-center text-red-600">
+                        <td colspan="6" class="p-4 text-center text-red-600">
                             Gagal memuat data: ${error.message}
                         </td>
                     </tr>
@@ -110,16 +125,32 @@
             }
         }
 
-        // Menyimpan data tabur benih
+        async function hapusTabur(id, kode) {
+            try {
+                const snapSapih = await getDocs(collection(db, "penyapihan"));
+
+                if (snapSapih.docs.some(x => x.data().batch === kode)) {
+                    alert("Batch ini sudah digunakan pada penyapihan sehingga tidak dapat dihapus.");
+                    return;
+                }
+
+                if (!confirm(`Hapus catatan tabur batch ${kode}?`)) return;
+
+                await deleteDoc(doc(db, "tabur_benih", id));
+                await muatTabel();
+
+            } catch (e) {
+                alert("Gagal menghapus data: " + e.message);
+            }
+        }
+
         window.simpanData = async function(e) {
             e.preventDefault();
 
             const kode = document.getElementById("t-kode").value.trim();
             const jenis = document.getElementById("t-jenis").value.trim();
             const tanggal = document.getElementById("t-tanggal").value;
-            const jumlah = Number(
-                document.getElementById("t-jumlah").value
-            );
+            const jumlah = Number(document.getElementById("t-jumlah").value);
 
             if (!kode || !jenis || !tanggal) {
                 alert("Mohon lengkapi seluruh data.");
@@ -144,7 +175,6 @@
                 });
 
                 alert("Data tabur berhasil disimpan ke Cloud!");
-
                 document.getElementById("form-tabur").reset();
 
                 await muatTabel();
@@ -159,7 +189,6 @@
             }
         };
 
-        // Jalankan setelah autentikasi berhasil
         await muatTabel();
     </script>
 </head>
@@ -185,35 +214,33 @@
             <form id="form-tabur" onsubmit="simpanData(event)" class="space-y-4">
 
                 <div>
-                    <label class="block text-sm font-medium">
-                        Kode Batch
-                    </label>
+                    <label class="block text-sm font-medium">Kode Batch</label>
                     <input
                         type="text"
                         id="t-kode"
+                        list="pilihan-kode"
                         required
                         placeholder="BATCH-PULAI-01"
                         class="w-full mt-1 p-3 border rounded-xl"
                     >
+                    <datalist id="pilihan-kode"></datalist>
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium">
-                        Jenis Pohon
-                    </label>
+                    <label class="block text-sm font-medium">Jenis Pohon</label>
                     <input
                         type="text"
                         id="t-jenis"
+                        list="pilihan-jenis"
                         required
                         placeholder="Alstonia spatulata (Pulai)"
                         class="w-full mt-1 p-3 border rounded-xl"
                     >
+                    <datalist id="pilihan-jenis"></datalist>
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium">
-                        Tanggal Tabur
-                    </label>
+                    <label class="block text-sm font-medium">Tanggal Tabur</label>
                     <input
                         type="date"
                         id="t-tanggal"
@@ -223,9 +250,7 @@
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium">
-                        Jumlah Benih
-                    </label>
+                    <label class="block text-sm font-medium">Jumlah Benih</label>
                     <input
                         type="number"
                         id="t-jumlah"
@@ -255,7 +280,6 @@
 
             <div class="overflow-x-auto">
                 <table class="w-full text-left border-collapse text-sm">
-
                     <thead>
                         <tr class="bg-emerald-100 text-emerald-900">
                             <th class="p-3">No</th>
@@ -263,22 +287,21 @@
                             <th class="p-3">Jenis Pohon</th>
                             <th class="p-3">Tanggal</th>
                             <th class="p-3">Jumlah</th>
+                            <th class="p-3">Aksi</th>
                         </tr>
                     </thead>
 
                     <tbody id="tabel-data">
                         <tr>
-                            <td colspan="5" class="p-4 text-center text-slate-400">
+                            <td colspan="6" class="p-4 text-center text-slate-400">
                                 Memuat data...
                             </td>
                         </tr>
                     </tbody>
-
                 </table>
             </div>
         </div>
 
     </main>
-
 </body>
 </html>
