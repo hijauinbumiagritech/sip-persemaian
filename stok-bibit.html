@@ -29,10 +29,16 @@
                 maximumFractionDigits: 0
             }).format(n || 0);
 
+        // Normalisasi teks:
+        // Menyamakan variasi tanda hubung agar 20-30 cm,
+        // 20–30 cm, dan 20 – 30 cm dianggap sama.
         const normal = (v) =>
             String(v || "")
+                .normalize("NFKC")
                 .trim()
                 .toLowerCase()
+                .replace(/[‐-‒–—―−]/g, "-")
+                .replace(/\s*-\s*/g, "-")
                 .replace(/\s+/g, " ");
 
         // Harga ditentukan oleh jenis + ukuran.
@@ -687,6 +693,8 @@
         // 12. Edit harga.
         window.editHarga = function(id, data) {
             editingHargaId = id;
+
+            document.getElementById("btn-batal-edit").classList.remove("hidden");
 
             document.getElementById("h-jenis").value =
                 data.jenis || "";
