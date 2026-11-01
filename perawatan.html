@@ -85,7 +85,7 @@
             if (!dataPerawatan.length) {
                 tabel.innerHTML = `
                     <tr>
-                        <td colspan="7" class="p-4 text-center text-slate-400">
+                        <td colspan="8" class="p-4 text-center text-slate-400">
                             Belum ada riwayat perawatan.
                         </td>
                     </tr>
@@ -103,6 +103,7 @@
                     <td class="p-3">${aman(d.tanggal || "-")}</td>
                     <td class="p-3 font-medium">${aman(d.jenis || "-")}</td>
                     <td class="p-3">${aman(d.lokasi || "-")}</td>
+                    <td class="p-3">${aman(d.ukuran || "Belum dicatat")}</td>
                     <td class="p-3">${formatJumlah(d.jumlah, d.satuan)}</td>
                     <td class="p-3 text-slate-600">${aman(d.catatan || "-")}</td>
                     <td class="p-3 whitespace-nowrap">
@@ -154,6 +155,7 @@
             document.getElementById("p-tanggal").value = d.tanggal || "";
             document.getElementById("p-jenis").value = d.jenis || "Penyiraman Rutin";
             document.getElementById("p-lokasi").value = d.lokasi || "";
+            document.getElementById("p-ukuran").value = d.ukuran || "";
             document.getElementById("p-jumlah").value = d.jumlah ?? "";
             document.getElementById("p-satuan").value = d.satuan || "";
             document.getElementById("p-catatan").value = d.catatan || "";
@@ -183,7 +185,8 @@
                 `Apakah Anda yakin ingin menghapus catatan perawatan berikut?\n\n` +
                 `Tanggal: ${data.tanggal || "-"}\n` +
                 `Kegiatan: ${data.jenis || "-"}\n` +
-                `Lokasi: ${data.lokasi || "-"}\n\n` +
+                `Lokasi: ${data.lokasi || "-"}\n` +
+                `Tinggi bibit: ${data.ukuran || "Belum dicatat"}\n\n` +
                 `Catatan ini akan dihapus dari riwayat.`
             );
 
@@ -213,6 +216,7 @@
             const tanggal = document.getElementById("p-tanggal").value;
             const jenis = document.getElementById("p-jenis").value;
             const lokasi = document.getElementById("p-lokasi").value.trim();
+            const ukuran = document.getElementById("p-ukuran").value;
             const jumlahInput = document.getElementById("p-jumlah").value;
             const satuan = document.getElementById("p-satuan").value;
             const catatan = document.getElementById("p-catatan").value.trim();
@@ -243,6 +247,7 @@
                     tanggal,
                     jenis,
                     lokasi,
+                    ukuran,
                     catatan,
                     jumlah,
                     satuan,
@@ -277,7 +282,7 @@
             console.error(error);
             tabel.innerHTML = `
                 <tr>
-                    <td colspan="7" class="p-4 text-center text-red-600">
+                    <td colspan="8" class="p-4 text-center text-red-600">
                         Gagal memuat data: ${aman(error.message)}
                     </td>
                 </tr>
@@ -300,7 +305,9 @@
     <main class="max-w-6xl mx-auto px-4 py-8 space-y-8">
 
         <section>
-            <h2 class="text-lg font-bold text-emerald-900 mb-3">Ringkasan Kegiatan Perawatan</h2>
+            <h2 class="text-lg font-bold text-emerald-900 mb-3">
+                Ringkasan Kegiatan Perawatan
+            </h2>
             <div id="ringkasan" class="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div class="bg-white p-4 rounded-xl shadow">Memuat data...</div>
             </div>
@@ -315,12 +322,14 @@
 
                 <div>
                     <label class="block text-sm font-medium">Tanggal Kegiatan</label>
-                    <input type="date" id="p-tanggal" required class="w-full mt-1 p-3 border rounded-xl">
+                    <input type="date" id="p-tanggal" required
+                        class="w-full mt-1 p-3 border rounded-xl">
                 </div>
 
                 <div>
                     <label class="block text-sm font-medium">Jenis Kegiatan</label>
-                    <select id="p-jenis" required class="w-full mt-1 p-3 border rounded-xl">
+                    <select id="p-jenis" required
+                        class="w-full mt-1 p-3 border rounded-xl">
                         <option value="Penyiraman Rutin">Penyiraman Rutin</option>
                         <option value="Pemupukan NPK/Organik">Pemupukan NPK/Organik</option>
                         <option value="Penyemprotan Pestisida">Penyemprotan Pestisida</option>
@@ -329,17 +338,46 @@
 
                 <div>
                     <label class="block text-sm font-medium">Lokasi Blok / Bedeng</label>
-                    <input type="text" id="p-lokasi" required placeholder="Contoh: Blok B3" class="w-full mt-1 p-3 border rounded-xl">
+                    <input type="text" id="p-lokasi" required
+                        placeholder="Contoh: Blok B3"
+                        class="w-full mt-1 p-3 border rounded-xl">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium">
+                        Tinggi Bibit yang Dirawat (cm)
+                    </label>
+                    <select id="p-ukuran"
+                        class="w-full mt-1 p-3 border rounded-xl bg-white">
+                        <option value="">Semua ukuran / tidak spesifik</option>
+                        <option value="10–20 cm">10–20 cm</option>
+                        <option value="20–30 cm">20–30 cm</option>
+                        <option value="30–50 cm">30–50 cm</option>
+                        <option value="50–80 cm">50–80 cm</option>
+                        <option value="80–100 cm">80–100 cm</option>
+                        <option value="100–150 cm">100–150 cm</option>
+                        <option value="Di atas 150 cm">Di atas 150 cm</option>
+                    </select>
+                    <p class="text-xs text-slate-500 mt-1">
+                        Pilih rentang tinggi jika kegiatan hanya untuk kelompok bibit tertentu.
+                    </p>
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                        <label class="block text-sm font-medium">Jumlah Pemakaian (opsional)</label>
-                        <input type="number" id="p-jumlah" min="0.01" step="0.01" placeholder="Contoh: 5" class="w-full mt-1 p-3 border rounded-xl">
+                        <label class="block text-sm font-medium">
+                            Jumlah Pemakaian (opsional)
+                        </label>
+                        <input type="number" id="p-jumlah"
+                            min="0.01" step="0.01"
+                            placeholder="Contoh: 5"
+                            class="w-full mt-1 p-3 border rounded-xl">
                     </div>
+
                     <div>
                         <label class="block text-sm font-medium">Satuan</label>
-                        <select id="p-satuan" class="w-full mt-1 p-3 border rounded-xl">
+                        <select id="p-satuan"
+                            class="w-full mt-1 p-3 border rounded-xl">
                             <option value="">Pilih satuan</option>
                             <option value="liter">Liter</option>
                             <option value="kg">Kilogram (kg)</option>
@@ -354,14 +392,18 @@
 
                 <div>
                     <label class="block text-sm font-medium">Catatan / Dosis</label>
-                    <textarea id="p-catatan" placeholder="Contoh: Dosis 2 gram per liter air" class="w-full mt-1 p-3 border rounded-xl"></textarea>
+                    <textarea id="p-catatan"
+                        placeholder="Contoh: Dosis 2 gram per liter air"
+                        class="w-full mt-1 p-3 border rounded-xl"></textarea>
                 </div>
 
                 <div class="flex gap-2">
-                    <button id="tombol-simpan" type="submit" class="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium disabled:opacity-50">
+                    <button id="tombol-simpan" type="submit"
+                        class="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white p-3 rounded-xl font-medium disabled:opacity-50">
                         Simpan ke Cloud
                     </button>
-                    <button id="tombol-batal" type="button" class="hidden bg-slate-200 px-4 rounded-xl">
+                    <button id="tombol-batal" type="button"
+                        class="hidden bg-slate-200 px-4 rounded-xl">
                         Batal
                     </button>
                 </div>
@@ -369,7 +411,9 @@
         </section>
 
         <section class="bg-white p-6 rounded-2xl shadow">
-            <h3 class="text-lg font-bold text-emerald-900 mb-4">Riwayat Log Perawatan</h3>
+            <h3 class="text-lg font-bold text-emerald-900 mb-4">
+                Riwayat Log Perawatan
+            </h3>
 
             <div class="overflow-x-auto">
                 <table class="w-full text-left border-collapse text-sm">
@@ -379,6 +423,7 @@
                             <th class="p-3">Tanggal</th>
                             <th class="p-3">Kegiatan</th>
                             <th class="p-3">Lokasi</th>
+                            <th class="p-3">Tinggi Bibit</th>
                             <th class="p-3">Jumlah</th>
                             <th class="p-3">Catatan</th>
                             <th class="p-3">Aksi</th>
@@ -386,7 +431,10 @@
                     </thead>
                     <tbody id="tabel-data">
                         <tr>
-                            <td colspan="7" class="p-4 text-center text-slate-400">Memuat data...</td>
+                            <td colspan="8"
+                                class="p-4 text-center text-slate-400">
+                                Memuat data...
+                            </td>
                         </tr>
                     </tbody>
                 </table>
